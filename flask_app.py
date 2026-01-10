@@ -26,9 +26,10 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # Session configuration for HTTPS with reverse proxy
 app.secret_key = 'your-secret-key-change-this-in-production-use-env-variable'
-app.config['SESSION_COOKIE_SECURE'] = True  # Only send cookie over HTTPS
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to False for testing - nginx handles HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_NAME'] = 'brickonizer_session'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max for PDFs
 
@@ -282,11 +283,17 @@ def save_boxes():
 def get_boxes(filename):
     """Get saved bounding boxes for an image"""
     session_id = session.get('session_id')
+    print(f"=== GET_BOXES called for {filename} ===")
+    print(f"Session ID from cookie: {session_id}")
+    print(f"Sessions in memory: {list(sessions.keys())}")
+    
     if not session_id or session_id not in sessions:
+        print(f"ERROR: Invalid session - session_id={session_id}")
         return jsonify({'error': 'Invalid session'}), 400
     
     image_data = sessions[session_id]['images'].get(filename)
     if not image_data:
+        print(f"ERROR: Image {filename} not found in session")
         return jsonify({'error': 'Image not found'}), 404
     
     boxes = []
