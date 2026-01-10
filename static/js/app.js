@@ -505,14 +505,12 @@ async function analyzeAllParts() {
     }, 500);
     
     try {
-        console.log('Starting analysis request...');
         const response = await fetch('/analyze', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             }
         });
-        console.log('Analysis response received:', response.status);
         
         // Stop polling and hide spinner
         clearInterval(progressInterval);
@@ -1072,7 +1070,7 @@ async function loadExport() {
                     let unrecognizedHTML = `
                         <div class="unrecognized-section">
                             <h3>⚠️ Unrecognized Parts</h3>
-                            <p>You will need to add these parts manually in brickIsbrick.com:</p>
+                            <p>You will need to add these parts manually in BrickIsBrick.com:</p>
                             <div class="unrecognized-grid">
                     `;
                     
