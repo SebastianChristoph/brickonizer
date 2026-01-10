@@ -33,4 +33,6 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_ENV=production
 
 # Run Flask
-CMD ["python", "flask_app.py"]
+#CMD ["python", "flask_app.py"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "300", "flask_app:app"]
+
