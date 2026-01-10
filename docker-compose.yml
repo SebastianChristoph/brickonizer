@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: lego-part-recognizer
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     volumes:
       - ./uploads:/app/uploads
     environment:
