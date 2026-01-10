@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.streamlit/
+.env
+uploads/
+*.log
+.DS_Store
+.vscode/
+.idea/
+venv/
+env/
+*.swp
+*.swo
+dist/
+build/

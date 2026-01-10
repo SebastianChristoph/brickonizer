@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  lego-recognizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lego-part-recognizer
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FLASK_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

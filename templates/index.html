@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brickonizer - Part Recognition Service</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header-row">
+            <h1>Brickonizer - A BrickIsBrick Part Recognition Service</h1>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button id="reset-session-btn" class="btn btn-secondary" onclick="resetSession()">🔄 Start New Session</button>
+            </div>
+        </div>
+        <div class="nav-tabs">
+            <button class="tab-btn active" data-tab="upload">Upload & Mark</button>
+            <button class="tab-btn" data-tab="results">Results</button>
+            <button class="tab-btn" data-tab="review">Review</button>
+            <button class="tab-btn" data-tab="export">Export</button>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="upload-tab" class="tab-content active">
+            <div class="upload-section">
+                <h2>Upload Images or PDF</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 5px;">
+                    <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
+                    <button id="add-images-btn" class="btn btn-primary" onclick="document.getElementById('file-input').click()">Add Parts List as Image</button>
+                    
+                    <input type="file" id="pdf-input" accept="application/pdf" style="display: none;">
+                    <button id="add-pdf-btn" class="btn btn-primary" onclick="document.getElementById('pdf-input').click()">Add Parts List as PDF</button>
+                </div>
+                <p style="color: #666; font-size: 13px; margin-bottom: 15px;">Max. 100 MB per upload</p>
+                
+                <!-- PDF Processing Spinner -->
+                <div id="pdf-spinner-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000;">
+                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; background: white; padding: 40px; border-radius: 12px;">
+                        <div class="spinner-circle" style="margin: 0 auto 20px;"></div>
+                        <h3 style="margin: 0; color: #667eea;">Processing PDF...</h3>
+                        <p style="color: #666; margin-top: 10px;">Please wait while the pages are being extracted.</p>
+                    </div>
+                </div>
+                
+                <!-- PDF Page Selection Modal -->
+                <div id="pdf-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 12px; max-width: 80%; max-height: 80%; overflow-y: auto;">
+                        <h3 style="margin-top: 0;">Select PDF Pages</h3>
+                        <p id="pdf-page-count" style="color: #666;"></p>
+                        <div id="pdf-pages-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin: 20px 0;"></div>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="closePdfModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="convertSelectedPages()">Use Selected Pages</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="image-list"></div>
+            </div>
+
+            <div class="canvas-section">
+                <h2>Mark Parts</h2>
+                
+                <div style="background: #f0f7ff; border-left: 4px solid #667eea; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+                    <h3 style="margin: 0 0 10px 0; color: #667eea; font-size: 16px;">📝 How to mark parts:</h3>
+                    <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                        <li><strong>Select an image</strong> from your uploaded list (click on thumbnail above)</li>
+                        <li><strong>Draw rectangles</strong> around each LEGO part by clicking and dragging</li>
+                        <li><strong>Be precise:</strong> Frame parts tightly, avoid text/numbers like "2x", "3x"</li>
+                        <li><strong>Use Auto Detect</strong> below for automatic box placement (you can adjust after)</li>
+                        <li><strong>Adjust box size if needed:</strong> Hover over box edges to resize - grab and drag any side</li>
+                    </ol>
+                    <p style="margin: 10px 0 0 0; color: #666; font-size: 13px;">💡 <strong>Tip:</strong> Click the red ✕ button on any box to delete it individually</p>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <button id="auto-detect-btn" class="btn btn-primary">Auto Detect</button>
+                    <p style="color: #666; font-size: 13px; margin-top: 5px;">Automatically detects and marks all parts in the selected image</p>
+                </div>
+                
+                <div class="canvas-container" style="border: 2px solid #ddd; border-radius: 4px;">
+                    <canvas id="drawing-canvas"></canvas>
+                </div>
+
+                <div class="canvas-controls">
+                    <button id="clear-box-btn" class="btn btn-secondary">Delete Last Box</button>
+                    <button id="clear-all-btn" class="btn btn-secondary">Delete All Boxes</button>
+                    <div class="box-counter">
+                        Box count: <span id="box-count">0</span>
+                    </div>
+                </div>
+
+                <div class="analyze-section">
+                    <div style="margin-bottom: 10px; text-align: center;">
+                        <input type="checkbox" id="no-text-checkbox" style="margin-right: 8px;">
+                        <label for="no-text-checkbox" style="font-size: 15px;">I checked that I did not accidentally mark text (e.g. "2x") as a part.</label>
+                    </div>
+                    <button id="analyze-btn" class="btn btn-primary" disabled>
+                        Analyze All Parts with the help of brickognize.com
+                        <span id="analyze-time-estimate" style="font-size: 12px; opacity: 0.8; display: block; margin-top: 3px;"></span>
+                    </button>
+                    <div id="analyze-spinner" class="spinner" style="display: none;">
+                        <p id="analyze-progress-text">Analyzing parts...</p>
+                        <div style="width: 300px; height: 20px; background: #e0e0e0; border-radius: 10px; margin: 10px auto; overflow: hidden;">
+                            <div id="analyze-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.3s;"></div>
+                        </div>
+                    </div>
+                    <div id="analyze-status"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Tab -->
+        <div id="results-tab" class="tab-content">
+            <h2>Results</h2>
+            <div id="results-summary"></div>
+            <div id="results-images"></div>
+        </div>
+
+        <!-- Review Tab -->
+        <div id="review-tab" class="tab-content">
+            <h2>Review Wizard</h2>
+            <div id="review-content">
+                <p>Please analyze parts first...</p>
+            </div>
+        </div>
+
+        <!-- Export Tab -->
+        <div id="export-tab" class="tab-content">
+            <h2>JSON Export</h2>
+            <div id="export-content">
+                <div class="export-buttons">
+                    <button id="export-btn" class="btn btn-primary">💾 Download JSON</button>
+                    <button id="copy-json-btn" class="btn btn-secondary">📋 Copy to Clipboard</button>
+                </div>
+                <pre id="json-preview"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/canvas.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
