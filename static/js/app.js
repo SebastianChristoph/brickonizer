@@ -432,6 +432,42 @@ async function analyzeAllParts() {
     const progressText = document.getElementById('analyze-progress-text');
     const progressBar = document.getElementById('analyze-progress-bar');
     
+    // Validate requirements before starting
+    let totalBoxes = 0;
+    for (const img of appState.uploadedImages) {
+        try {
+            const response = await fetch(`/get_boxes/${img.filename}`);
+            if (response.ok) {
+                const data = await response.json();
+                totalBoxes += (data.boxes || []).length;
+            }
+        } catch (error) {
+            console.error('Error checking boxes:', error);
+        }
+    }
+    
+    const noTextCheckbox = document.getElementById('no-text-checkbox');
+    const checkboxChecked = noTextCheckbox ? noTextCheckbox.checked : false;
+    
+    // Check if requirements are met
+    if (appState.uploadedImages.length === 0) {
+        statusDiv.className = 'error';
+        statusDiv.textContent = '❌ Please upload at least one image first.';
+        return;
+    }
+    
+    if (totalBoxes === 0) {
+        statusDiv.className = 'error';
+        statusDiv.textContent = '❌ Please mark at least one part by drawing boxes around them.';
+        return;
+    }
+    
+    if (!checkboxChecked) {
+        statusDiv.className = 'error';
+        statusDiv.textContent = '❌ Please confirm the checkbox that you did not mark text as parts.';
+        return;
+    }
+    
     // Show spinner, hide status, hide button
     spinner.style.display = 'block';
     analyzeBtn.style.display = 'none';
