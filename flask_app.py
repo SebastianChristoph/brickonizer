@@ -7,6 +7,7 @@ import base64
 import asyncio
 from io import BytesIO
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
 import numpy as np
 import cv2
@@ -19,7 +20,15 @@ from services import ImageProcessor, get_api_instance
 from utils.bricklink_colors import BricklinkColorMap
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+
+# Configure for reverse proxy (nginx)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+# Session configuration for HTTPS with reverse proxy
+app.secret_key = 'your-secret-key-change-this-in-production-use-env-variable'
+app.config['SESSION_COOKIE_SECURE'] = True  # Only send cookie over HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max for PDFs
 
