@@ -382,12 +382,15 @@ def get_analysis_progress():
 @app.route('/analyze', methods=['POST'])
 def analyze_parts():
     """Analyze all marked parts"""
+    print("=== ANALYZE REQUEST RECEIVED ===")
     session_id = session.get('session_id')
     if not session_id or session_id not in sessions:
+        print(f"ERROR: Invalid session - session_id={session_id}")
         return jsonify({'error': 'Invalid session'}), 400
     
     session_data = sessions[session_id]
     all_parts = []
+    print(f"Session has {len(session_data['images'])} images")
     
     # Collect all parts from all images
     for filename, image_data in session_data['images'].items():

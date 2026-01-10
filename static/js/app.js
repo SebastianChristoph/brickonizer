@@ -505,9 +505,14 @@ async function analyzeAllParts() {
     }, 500);
     
     try {
+        console.log('Starting analysis request...');
         const response = await fetch('/analyze', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
         });
+        console.log('Analysis response received:', response.status);
         
         // Stop polling and hide spinner
         clearInterval(progressInterval);
