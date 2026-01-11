@@ -7,7 +7,6 @@ import base64
 import asyncio
 from io import BytesIO
 from werkzeug.utils import secure_filename
-from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
 import numpy as np
 import cv2
@@ -20,16 +19,7 @@ from services import ImageProcessor, get_api_instance
 from utils.bricklink_colors import BricklinkColorMap
 
 app = Flask(__name__)
-
-# Configure for reverse proxy (nginx)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-
-# Session configuration for HTTPS with reverse proxy
-app.secret_key = 'your-secret-key-change-this-in-production-use-env-variable'
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to False for testing - nginx handles HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_NAME'] = 'brickonizer_session'
+app.secret_key = 'your-secret-key-change-this'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max for PDFs
 
@@ -637,7 +627,7 @@ def export_json():
                 
                 valid_parts.append({
                     'partNum': part.user_data['part_num'],
-                    'colorId': str(color_id),  # Ensure it's a string
+                    'colorId': color_id if color_id is not None else None,  # Keep as integer or null
                     'quantity': part.user_data['quantity'],
                     'originalName': part.recognition_result.part_name if part.recognition_result else 'Unknown',
                     'confidence': part.recognition_result.confidence if part.recognition_result else 0.0
@@ -727,5 +717,5 @@ def reset_session():
     return jsonify({'success': True, 'session_id': new_session_id})
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

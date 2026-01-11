@@ -1,6 +1,5 @@
 # Web Framework
-Flask==3.0.0
-Werkzeug==3.0.1
+# Flask requirements are in requirements_flask.txt
 
 # Image Processing
 opencv-python==4.9.0.80
@@ -16,4 +15,3 @@ pandas==2.2.0
 
 # Utilities
 python-dotenv==1.0.1
-gunicorn

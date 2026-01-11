@@ -7,13 +7,12 @@ services:
       dockerfile: Dockerfile
     container_name: lego-part-recognizer
     ports:
-      - "127.0.0.1:5000:5000"
+      - "5000:5000"
     volumes:
       - ./uploads:/app/uploads
     environment:
       - PYTHONUNBUFFERED=1
       - FLASK_ENV=production
-      - FLASK_DEBUG=0
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]

@@ -432,42 +432,6 @@ async function analyzeAllParts() {
     const progressText = document.getElementById('analyze-progress-text');
     const progressBar = document.getElementById('analyze-progress-bar');
     
-    // Validate requirements before starting
-    let totalBoxes = 0;
-    for (const img of appState.uploadedImages) {
-        try {
-            const response = await fetch(`/get_boxes/${img.filename}`);
-            if (response.ok) {
-                const data = await response.json();
-                totalBoxes += (data.boxes || []).length;
-            }
-        } catch (error) {
-            console.error('Error checking boxes:', error);
-        }
-    }
-    
-    const noTextCheckbox = document.getElementById('no-text-checkbox');
-    const checkboxChecked = noTextCheckbox ? noTextCheckbox.checked : false;
-    
-    // Check if requirements are met
-    if (appState.uploadedImages.length === 0) {
-        statusDiv.className = 'error';
-        statusDiv.textContent = '❌ Please upload at least one image first.';
-        return;
-    }
-    
-    if (totalBoxes === 0) {
-        statusDiv.className = 'error';
-        statusDiv.textContent = '❌ Please mark at least one part by drawing boxes around them.';
-        return;
-    }
-    
-    if (!checkboxChecked) {
-        statusDiv.className = 'error';
-        statusDiv.textContent = '❌ Please confirm the checkbox that you did not mark text as parts.';
-        return;
-    }
-    
     // Show spinner, hide status, hide button
     spinner.style.display = 'block';
     analyzeBtn.style.display = 'none';
@@ -506,10 +470,7 @@ async function analyzeAllParts() {
     
     try {
         const response = await fetch('/analyze', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            method: 'POST'
         });
         
         // Stop polling and hide spinner
@@ -689,6 +650,146 @@ async function loadReviewWizard() {
     }
 }
 
+// Often Unrecognized Parts Helper
+const oftenUnrecognizedParts = [
+    '85861',
+    '3070',
+    '2412b'
+];
+
+function renderOftenUnrecognizedSidebar(isRecognized) {
+    // Bei unrecognized automatisch geöffnet, bei recognized geschlossen
+    const openClass = !isRecognized ? 'open' : '';
+    
+    let partsHtml = '';
+    oftenUnrecognizedParts.forEach(partNum => {
+        partsHtml += `
+            <div class="often-part-item" onclick="useOftenPart('${partNum}')" title="Click to use this part number">
+                <img src="/static/often/${partNum}.png" alt="${partNum}" onerror="this.style.display='none'">
+                <div class="often-part-info">
+                    <div class="often-part-number">${partNum}</div>
+                    <div class="often-part-hint">Click to use</div>
+                </div>
+            </div>
+        `;
+    });
+    
+    return `
+        <button class="often-sidebar-toggle" onclick="toggleOftenSidebar()" id="often-toggle-btn">
+            📚 Help
+        </button>
+        <div class="often-unrecognized-sidebar ${openClass}" id="often-sidebar">
+            <div class="often-sidebar-header">
+                ❓ Often Unrecognized Parts
+            </div>
+            <div class="often-sidebar-content">
+                ${partsHtml || '<p style="text-align: center; color: #999; font-size: 12px;">No reference parts available</p>'}
+            </div>
+        </div>
+    `;
+}
+
+function toggleOftenSidebar() {
+    const sidebar = document.getElementById('often-sidebar');
+    if (sidebar) {
+        sidebar.classList.toggle('open');
+    }
+}
+
+function useOftenPart(partNumber) {
+    const partInput = document.getElementById('part-num-input');
+    if (partInput) {
+        partInput.value = partNumber;
+        partInput.focus();
+        
+        // Visual feedback
+        partInput.style.background = '#d4edda';
+        setTimeout(() => {
+            partInput.style.background = '';
+        }, 1000);
+    }
+}
+
+function getQuickColorChips() {
+    const quickColors = [
+        "Black",
+        "White",
+        "Light Bluish Gray",
+        "Dark Bluish Gray",
+        "Red",
+        "Yellow",
+        "Reddish Brown",
+        "Blue",
+        "Tan",
+        "Light Gray"
+    ];
+    
+    let chipsHtml = '';
+    quickColors.forEach(colorName => {
+        const color = appState.colors.find(c => c.name === colorName);
+        if (color) {
+            const hexColor = color.rgb;
+            chipsHtml += `
+                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${colorName.replace(/'/g, "\\'")}')"
+                     title="${colorName}">
+                    <div class="quick-color-chip-circle" style="background: ${hexColor};"></div>
+                    <span class="quick-color-chip-name">${colorName}</span>
+                </div>
+            `;
+        }
+    });
+    
+    return chipsHtml;
+}
+
+function selectQuickColor(colorId, hexColor, colorName) {
+    selectColor(colorId, hexColor, colorName);
+}
+
+function showOriginalImage(imageName) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('original-image-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'original-image-modal';
+        modal.className = 'original-image-modal';
+        modal.innerHTML = `
+            <div class="original-image-content">
+                <button class="close-modal-btn" onclick="closeOriginalImage()">✕ Close</button>
+                <img id="original-image-img" src="" alt="Original Image">
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        // Close on background click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeOriginalImage();
+            }
+        });
+    }
+    
+    // Set image source and show modal
+    const img = document.getElementById('original-image-img');
+    img.src = `/image/${imageName}`;
+    modal.classList.add('active');
+}
+
+function closeOriginalImage() {
+    const modal = document.getElementById('original-image-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+function incrementQuantity() {
+    const quantityInput = document.getElementById('quantity-input');
+    if (quantityInput) {
+        const currentValue = parseInt(quantityInput.value) || 1;
+        quantityInput.value = currentValue + 1;
+    }
+}
+
 function displayReviewPart() {
     const reviewContent = document.getElementById('review-content');
     
@@ -753,7 +854,8 @@ function displayReviewPart() {
     
     reviewContent.innerHTML = `
         <div class="review-wizard">
-            <div class="review-progress" style="margin-bottom: 15px;">
+            ${renderOftenUnrecognizedSidebar(part.recognized)}
+            <div class="review-progress" style="margin-bottom: 15px; position: relative;">
                 <h3 style="margin-bottom: 5px;">Part ${partNum} of ${total}</h3>
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: ${progress}%"></div>
@@ -803,10 +905,19 @@ function displayReviewPart() {
                                 </div>
                             </div>
                             <input type="hidden" id="color-select" value="">
+                            <div class="quick-color-chips">
+                                ${getQuickColorChips()}
+                            </div>
                         </div>
                         <div>
+                            <button class="btn btn-secondary" style="width: 100%; margin-bottom: 5px; padding: 6px 12px; font-size: 12px;" onclick="showOriginalImage('${part.image_name}')">
+                                🖼️ Show Original
+                            </button>
                             <label style="font-size: 12px; display: block; margin-bottom: 3px;">Quantity:</label>
-                            <input type="number" id="quantity-input" value="1" min="1" style="width: 100%; padding: 6px;">
+                            <div style="display: flex; gap: 5px;">
+                                <input type="number" id="quantity-input" value="1" min="1" style="flex: 1; padding: 6px;">
+                                <button class="btn btn-primary" onclick="incrementQuantity()" style="padding: 6px 12px; font-size: 16px; line-height: 1;">+</button>
+                            </div>
                         </div>
                     </div>
                     ${alternativeParts.length > 0 ? `
@@ -1050,13 +1161,35 @@ async function loadExport() {
             // Add copy to clipboard button
             const copyBtn = document.getElementById('copy-json-btn');
             if (copyBtn) {
-                copyBtn.onclick = () => {
-                    navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => {
+                copyBtn.onclick = async () => {
+                    const jsonText = JSON.stringify(data, null, 2);
+                    
+                    try {
+                        // Try modern clipboard API first
+                        await navigator.clipboard.writeText(jsonText);
                         copyBtn.textContent = '✅ Copied!';
                         setTimeout(() => {
-                            copyBtn.textContent = '📋 Copy to clipboard';
+                            copyBtn.textContent = '📋 Copy to Clipboard';
                         }, 2000);
-                    });
+                    } catch (err) {
+                        // Fallback for older browsers or failed clipboard access
+                        const textArea = document.createElement('textarea');
+                        textArea.value = jsonText;
+                        textArea.style.position = 'fixed';
+                        textArea.style.left = '-999999px';
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        try {
+                            document.execCommand('copy');
+                            copyBtn.textContent = '✅ Copied!';
+                            setTimeout(() => {
+                                copyBtn.textContent = '📋 Copy to Clipboard';
+                            }, 2000);
+                        } catch (err2) {
+                            alert('Copy failed. Please copy manually from the preview below.');
+                        }
+                        document.body.removeChild(textArea);
+                    }
                 };
             }
             
@@ -1070,7 +1203,7 @@ async function loadExport() {
                     let unrecognizedHTML = `
                         <div class="unrecognized-section">
                             <h3>⚠️ Unrecognized Parts</h3>
-                            <p>You will need to add these parts manually in BrickIsBrick.com:</p>
+                            <p>You will need to add these parts manually in brickIsbrick.com:</p>
                             <div class="unrecognized-grid">
                     `;
                     
@@ -1134,3 +1267,9 @@ document.addEventListener('click', function(event) {
 
 window.toggleColorDropdown = toggleColorDropdown;
 window.selectColor = selectColor;
+window.selectQuickColor = selectQuickColor;
+window.showOriginalImage = showOriginalImage;
+window.closeOriginalImage = closeOriginalImage;
+window.toggleOftenSidebar = toggleOftenSidebar;
+window.useOftenPart = useOftenPart;
+window.incrementQuantity = incrementQuantity;
