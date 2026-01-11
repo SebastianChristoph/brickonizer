@@ -179,7 +179,6 @@ function initializeCanvas() {
                 const cropData = await cropResponse.json();
                 
                 // Hide overlay spinner
-                const overlay = document.getElementById('text-removal-overlay');
                 if (overlay) overlay.style.display = 'none';
                 
                 if (cropData.success) {
