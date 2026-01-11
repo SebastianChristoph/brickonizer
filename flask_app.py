@@ -7,6 +7,7 @@ import base64
 import asyncio
 from io import BytesIO
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
 import numpy as np
 import cv2
@@ -19,7 +20,15 @@ from services import ImageProcessor, get_api_instance
 from utils.bricklink_colors import BricklinkColorMap
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+
+# Configure for reverse proxy (nginx)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+# Session configuration for HTTPS with reverse proxy
+app.secret_key = 'your-secret-key-change-this-in-production-use-env-variable'
+app.config['SESSION_COOKIE_SECURE'] = True  # Only send cookie over HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max for PDFs
 
@@ -382,12 +391,15 @@ def get_analysis_progress():
 @app.route('/analyze', methods=['POST'])
 def analyze_parts():
     """Analyze all marked parts"""
+    print("=== ANALYZE REQUEST RECEIVED ===")
     session_id = session.get('session_id')
     if not session_id or session_id not in sessions:
+        print(f"ERROR: Invalid session - session_id={session_id}")
         return jsonify({'error': 'Invalid session'}), 400
     
     session_data = sessions[session_id]
     all_parts = []
+    print(f"Session has {len(session_data['images'])} images")
     
     # Collect all parts from all images
     for filename, image_data in session_data['images'].items():
@@ -627,7 +639,7 @@ def export_json():
                 
                 valid_parts.append({
                     'partNum': part.user_data['part_num'],
-                    'colorId': color_id if color_id is not None else None,  # Keep as integer or null
+                    'colorId': color_id if color_id is not None else None,
                     'quantity': part.user_data['quantity'],
                     'originalName': part.recognition_result.part_name if part.recognition_result else 'Unknown',
                     'confidence': part.recognition_result.confidence if part.recognition_result else 0.0
@@ -717,5 +729,5 @@ def reset_session():
     return jsonify({'success': True, 'session_id': new_session_id})
 
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
