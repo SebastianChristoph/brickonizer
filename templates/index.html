@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <div class="header-row">
-            <h1>Brickonizer - A BrickIsBrick Part Recognition Service</h1>
+            <h3>Brickonizer - A BrickIsBrick Part Recognition Service</h3>
             <div style="display: flex; gap: 10px; align-items: center;">
                 <button id="reset-session-btn" class="btn btn-secondary" onclick="resetSession()">🔄 Start New Session</button>
             </div>
@@ -76,10 +76,18 @@
                 
                 <div style="margin-bottom: 15px;">
                     <button id="auto-detect-btn" class="btn btn-primary">Auto Detect</button>
-                    <p style="color: #666; font-size: 13px; margin-top: 5px;">Automatically detects and marks all parts in the selected image</p>
+                    <p style="color: #666; font-size: 13px;">Automatically finds all parts and removes "2x", "4x" text annotations</p>
                 </div>
                 
-                <div class="canvas-container" style="border: 2px solid #ddd; border-radius: 4px;">
+                <div class="canvas-container" style="position: relative; border: 2px solid #ddd; border-radius: 4px;">
+                    <!-- Text Removal Overlay -->
+                    <div id="text-removal-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); z-index: 100; border-radius: 4px;">
+                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+                            <div class="spinner-circle" style="margin: 0 auto 15px; width: 60px; height: 60px; border-width: 4px;"></div>
+                            <h3 style="margin: 0; color: white; font-size: 20px;">🔍 Removing text...</h3>
+                            <p style="color: rgba(255,255,255,0.8); margin-top: 10px;">Detecting and removing "2x", "4x" annotations</p>
+                        </div>
+                    </div>
                     <canvas id="drawing-canvas"></canvas>
                 </div>
 
@@ -128,12 +136,14 @@
 
         <!-- Export Tab -->
         <div id="export-tab" class="tab-content">
-            <h2>JSON Export</h2>
+            <h2>Export</h2>
             <div id="export-content">
                 <div class="export-buttons">
-                    <button id="export-btn" class="btn btn-primary">💾 Download JSON</button>
-                    <button id="copy-json-btn" class="btn btn-secondary">📋 Copy to Clipboard</button>
+                    <button id="export-btn" class="btn btn-primary" onclick="downloadJson()">💾 Download JSON</button>
+                    <button id="export-bricklink-btn" class="btn btn-success" onclick="downloadBrickLinkXml()">🧱 Export as BrickLink XML</button>
+                    <button id="copy-json-btn" class="btn btn-secondary" onclick="copyJsonToClipboard()">📋 Copy to Clipboard</button>
                 </div>
+                <h3 style="margin-top: 20px;">JSON Preview</h3>
                 <pre id="json-preview"></pre>
             </div>
         </div>

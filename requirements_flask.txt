@@ -5,3 +5,5 @@ httpx==0.26.0
 Werkzeug==3.0.1
 numpy==1.26.3
 PyMuPDF==1.23.8
+pytesseract==0.3.10
+gunicorn==21.2.0

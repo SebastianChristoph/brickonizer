@@ -11,7 +11,9 @@ const appState = {
     currentReviewIndex: 0,
     reviewData: [],
     reviewedParts: new Set(),  // Track which parts have been reviewed
-    pdfData: null  // Store PDF page data
+    pdfData: null,  // Store PDF page data
+    oftenParts: [],  // Often unrecognized parts (loaded dynamically)
+    isAutoDetecting: false  // Track auto-detect state
 };
 
 // Initialize on page load
@@ -21,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeUpload();
     initializeAnalysis();
     loadColors();
+    loadOftenParts();
     checkAndResetSession();
 });
 
@@ -128,7 +131,17 @@ function initializeCanvas() {
             return;
         }
         
+        const btn = document.getElementById('auto-detect-btn');
+        const originalText = btn.textContent;
+        btn.innerHTML = '<span class="spinner-circle" style="width: 16px; height: 16px; display: inline-block; margin-right: 5px; border: 2px solid #fff; border-top-color: transparent; vertical-align: middle;"></span>Processing...';
+        btn.disabled = true;
+        
+        // Set auto-detecting flag
+        appState.isAutoDetecting = true;
+        await updateAnalyzeButtonState();
+        
         try {
+            // Step 1: Auto detect boxes
             const response = await fetch('/auto_detect_boxes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -144,15 +157,105 @@ function initializeCanvas() {
                     return;
                 }
                 
+                // Set detected boxes
                 appState.canvasDrawer.setBoxes(data.boxes);
+                
+                // Step 2: Automatically remove text from boxes
+                btn.innerHTML = '<span class="spinner-circle" style="width: 16px; height: 16px; display: inline-block; margin-right: 5px; border: 2px solid #fff; border-top-color: transparent; vertical-align: middle;"></span>Removing text...';
+                
+                // Show overlay spinner
+                const overlay = document.getElementById('text-removal-overlay');
+                if (overlay) overlay.style.display = 'block';
+                
+                const cropResponse = await fetch('/crop_text_from_boxes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        filename: appState.canvasDrawer.currentFilename,
+                        boxes: data.boxes
+                    })
+                });
+                
+                const cropData = await cropResponse.json();
+                
+                // Hide overlay spinner
+                const overlay = document.getElementById('text-removal-overlay');
+                if (overlay) overlay.style.display = 'none';
+                
+                if (cropData.success) {
+                    // Update boxes with cropped versions
+                    appState.canvasDrawer.setBoxes(cropData.boxes);
+                    
+                    if (cropData.modified > 0) {
+                        console.log(`Auto-detect: Found ${data.count} parts, removed text from ${cropData.modified} boxes`);
+                    }
+                }
             } else {
                 console.error('Auto-detect error:', data.error);
             }
         } catch (error) {
             console.error('Error auto-detecting boxes:', error);
             alert('Error during automatic detection');
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+            appState.isAutoDetecting = false;
+            await updateAnalyzeButtonState();
         }
     });
+    
+    // Crop text button (optional - only exists if element is present)
+    const cropTextBtn = document.getElementById('crop-text-btn');
+    if (cropTextBtn) {
+        cropTextBtn.addEventListener('click', async () => {
+            if (!appState.canvasDrawer.currentFilename) {
+                alert('Please select an image first');
+                return;
+            }
+            
+            const currentBoxes = appState.canvasDrawer.getBoxes();
+            if (currentBoxes.length === 0) {
+                alert('No boxes to process. Please mark parts first or use Auto Detect.');
+                return;
+            }
+            
+            const btn = document.getElementById('crop-text-btn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Processing...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/crop_text_from_boxes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        filename: appState.canvasDrawer.currentFilename,
+                        boxes: currentBoxes
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    appState.canvasDrawer.setBoxes(data.boxes);
+                    
+                    if (data.modified > 0) {
+                        alert(`✅ Success!\n\nModified ${data.modified} of ${data.total} boxes to remove text annotations.`);
+                    } else {
+                        alert(`ℹ️ No text found\n\nNo text annotations like "2x", "4x" were detected in any boxes.`);
+                    }
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error cropping text from boxes:', error);
+                alert('Error processing boxes');
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        });
+    }
 }
 
 // Upload Management
@@ -384,6 +487,16 @@ async function updateAnalyzeButtonState() {
     const analyzeBtn = document.getElementById('analyze-btn');
     const timeEstimate = document.getElementById('analyze-time-estimate');
     if (!analyzeBtn) return;
+    
+    // Disable if auto-detecting
+    if (appState.isAutoDetecting) {
+        analyzeBtn.disabled = true;
+        if (timeEstimate) {
+            timeEstimate.textContent = 'Please wait for auto-detection to complete...';
+            timeEstimate.style.color = '#ffc107';
+        }
+        return;
+    }
     
     try {
         // Check all uploaded images for boxes
@@ -651,23 +764,30 @@ async function loadReviewWizard() {
 }
 
 // Often Unrecognized Parts Helper
-const oftenUnrecognizedParts = [
-    '85861',
-    '3070',
-    '2412b'
-];
+async function loadOftenParts() {
+    try {
+        const response = await fetch('/get_often_parts');
+        if (response.ok) {
+            const data = await response.json();
+            appState.oftenParts = data.parts;
+            console.log(`Loaded ${appState.oftenParts.length} often unrecognized parts`);
+        }
+    } catch (error) {
+        console.error('Error loading often parts:', error);
+    }
+}
 
 function renderOftenUnrecognizedSidebar(isRecognized) {
     // Bei unrecognized automatisch geöffnet, bei recognized geschlossen
     const openClass = !isRecognized ? 'open' : '';
     
     let partsHtml = '';
-    oftenUnrecognizedParts.forEach(partNum => {
+    appState.oftenParts.forEach(part => {
         partsHtml += `
-            <div class="often-part-item" onclick="useOftenPart('${partNum}')" title="Click to use this part number">
-                <img src="/static/often/${partNum}.png" alt="${partNum}" onerror="this.style.display='none'">
+            <div class="often-part-item" onclick="useOftenPart('${part.number}')" title="Click to use this part number">
+                <img src="${part.image}" alt="${part.number}" onerror="this.style.display='none'">
                 <div class="often-part-info">
-                    <div class="often-part-number">${partNum}</div>
+                    <div class="often-part-number">${part.number}</div>
                     <div class="often-part-hint">Click to use</div>
                 </div>
             </div>
@@ -746,7 +866,15 @@ function selectQuickColor(colorId, hexColor, colorName) {
     selectColor(colorId, hexColor, colorName);
 }
 
-function showOriginalImage(imageName) {
+let imageModalTimeout = null;
+
+function showOriginalImageOnHover(imageName) {
+    // Clear any pending hide timeout
+    if (imageModalTimeout) {
+        clearTimeout(imageModalTimeout);
+        imageModalTimeout = null;
+    }
+    
     // Create modal if it doesn't exist
     let modal = document.getElementById('original-image-modal');
     if (!modal) {
@@ -754,19 +882,11 @@ function showOriginalImage(imageName) {
         modal.id = 'original-image-modal';
         modal.className = 'original-image-modal';
         modal.innerHTML = `
-            <div class="original-image-content">
-                <button class="close-modal-btn" onclick="closeOriginalImage()">✕ Close</button>
+            <div class="original-image-content" onmouseenter="clearImageModalTimeout()" onmouseleave="hideOriginalImageOnHover()">
                 <img id="original-image-img" src="" alt="Original Image">
             </div>
         `;
         document.body.appendChild(modal);
-        
-        // Close on background click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeOriginalImage();
-            }
-        });
     }
     
     // Set image source and show modal
@@ -775,11 +895,21 @@ function showOriginalImage(imageName) {
     modal.classList.add('active');
 }
 
-function closeOriginalImage() {
-    const modal = document.getElementById('original-image-modal');
-    if (modal) {
-        modal.classList.remove('active');
+function clearImageModalTimeout() {
+    if (imageModalTimeout) {
+        clearTimeout(imageModalTimeout);
+        imageModalTimeout = null;
     }
+}
+
+function hideOriginalImageOnHover() {
+    // Add a small delay to allow moving from button to modal
+    imageModalTimeout = setTimeout(() => {
+        const modal = document.getElementById('original-image-modal');
+        if (modal) {
+            modal.classList.remove('active');
+        }
+    }, 150);
 }
 
 function incrementQuantity() {
@@ -876,6 +1006,7 @@ function displayReviewPart() {
                     ` : ''}
                     <div style="display: flex; flex-direction: column; gap: 8px;">
                         ${partNum > 1 ? '<button class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;" onclick="previousPart()">◄ Back</button>' : ''}
+                        <button class="btn btn-danger" style="padding: 8px 16px; font-size: 13px; background: #dc3545;" onclick="removePartFromList()">🗑️ Remove from List</button>
                         ${part.recognized ? '<button class="btn btn-warning" style="padding: 8px 16px; font-size: 13px;" onclick="noMatchPart()">None of these</button>' : ''}
                         ${part.recognized ? '<button class="btn btn-danger" style="padding: 8px 16px; font-size: 13px;" onclick="skipPart()">Skip</button>' : '<button class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;" onclick="unknownPart()">Don\'t know</button>'}
                         <button class="btn btn-success" style="padding: 8px 16px; font-size: 13px;" onclick="savePart()">Save & Next ►</button>
@@ -910,13 +1041,16 @@ function displayReviewPart() {
                             </div>
                         </div>
                         <div>
-                            <button class="btn btn-secondary" style="width: 100%; margin-bottom: 5px; padding: 6px 12px; font-size: 12px;" onclick="showOriginalImage('${part.image_name}')">
+                            <button class="btn btn-secondary" style="width: 100%; margin-bottom: 5px; padding: 6px 12px; font-size: 12px;" onmouseenter="showOriginalImageOnHover('${part.image_name}')" onmouseleave="hideOriginalImageOnHover()">
                                 🖼️ Show Original
                             </button>
                             <label style="font-size: 12px; display: block; margin-bottom: 3px;">Quantity:</label>
-                            <div style="display: flex; gap: 5px;">
+                            <div style="display: flex; gap: 5px; margin-bottom: 3px;">
                                 <input type="number" id="quantity-input" value="1" min="1" style="flex: 1; padding: 6px;">
                                 <button class="btn btn-primary" onclick="incrementQuantity()" style="padding: 6px 12px; font-size: 16px; line-height: 1;">+</button>
+                            </div>
+                            <div id="quantity-info" style="font-size: 10px; color: #6c757d; display: none; font-style: italic;">
+                                ℹ️ Quantity read from image (may contain errors)
                             </div>
                         </div>
                     </div>
@@ -956,6 +1090,9 @@ function displayReviewPart() {
                 selectColor(firstColor.name, hexColor, firstColor.name);
             }
         }
+        
+        // Auto-detect quantity
+        autoDetectQuantity();
     }, 100);
 }
 
@@ -1006,6 +1143,31 @@ async function skipPart() {
     });
     
     nextPart();
+}
+
+async function removePartFromList() {
+    if (!confirm('Remove this part from the list?\n\nThis will permanently delete this detection and reduce the total part count.')) {
+        return;
+    }
+    
+    // Call backend to remove the part
+    const response = await fetch('/remove_part', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            index: appState.currentReviewIndex
+        })
+    });
+    
+    if (response.ok) {
+        const data = await response.json();
+        console.log(`Removed part ${appState.currentReviewIndex + 1}, new total: ${data.new_total}`);
+        
+        // Reload the review to update indices and total count
+        await loadReview();
+    } else {
+        alert('Error removing part');
+    }
 }
 
 async function unknownPart() {
@@ -1134,7 +1296,87 @@ async function loadColors() {
     } catch (error) {
         console.error('Error loading colors:', error);
     }
-}
+    }
+
+
+// Global function for downloading JSON
+window.downloadJson = function() {
+    console.log('[EXPORT] downloadJson called');
+    const jsonPreview = document.getElementById('json-preview');
+    if (!jsonPreview || !jsonPreview.textContent) {
+        console.error('[EXPORT] No JSON data available');
+        alert('No data to export. Please go to Export tab first.');
+        return;
+    }
+    
+    console.log('[EXPORT] Creating JSON download');
+    const blob = new Blob([jsonPreview.textContent], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'brickonizer_export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    console.log('[EXPORT] JSON download triggered');
+};
+
+// Global function for BrickLink XML export
+window.downloadBrickLinkXml = function() {
+    console.log('[EXPORT] downloadBrickLinkXml called');
+    window.location.href = '/export_bricklink_xml';
+};
+
+// Global function for copy button (called from HTML onclick)
+window.copyJsonToClipboard = function() {
+    console.log('[COPY] Function called');
+    const jsonPreview = document.getElementById('json-preview');
+    const copyBtn = document.getElementById('copy-json-btn');
+    
+    if (!jsonPreview || !jsonPreview.textContent) {
+        console.error('[COPY] No JSON content found');
+        alert('No JSON content to copy. Please load the export first.');
+        return;
+    }
+    
+    const jsonText = jsonPreview.textContent;
+    console.log('[COPY] JSON text length:', jsonText.length);
+    
+    // Create textarea for copying
+    const textArea = document.createElement('textarea');
+    textArea.value = jsonText;
+    textArea.style.position = 'absolute';
+    textArea.style.left = '-9999px';
+    textArea.style.top = '0';
+    textArea.setAttribute('readonly', '');
+    document.body.appendChild(textArea);
+    
+    // Select and copy
+    textArea.select();
+    textArea.setSelectionRange(0, 99999);
+    
+    let success = false;
+    try {
+        success = document.execCommand('copy');
+        console.log('[COPY] execCommand result:', success);
+    } catch (err) {
+        console.error('[COPY] execCommand error:', err);
+    }
+    
+    document.body.removeChild(textArea);
+    
+    if (success && copyBtn) {
+        copyBtn.textContent = '✅ Copied!';
+        copyBtn.style.background = '#28a745';
+        console.log('[COPY] Success!');
+        setTimeout(() => {
+            copyBtn.textContent = '📋 Copy to Clipboard';
+            copyBtn.style.background = '';
+        }, 2000);
+    } else {
+        console.error('[COPY] Failed!');
+        alert('Copy failed. Please select and copy manually from the preview below.');
+    }
+};
 
 // Export
 async function loadExport() {
@@ -1149,79 +1391,98 @@ async function loadExport() {
             jsonPreview.textContent = JSON.stringify(data, null, 2);
             
             // Update export button
-            exportBtn.onclick = () => {
-                const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'brickonizer_export.json';
-                a.click();
-            };
-            
-            // Add copy to clipboard button
-            const copyBtn = document.getElementById('copy-json-btn');
-            if (copyBtn) {
-                copyBtn.onclick = async () => {
-                    const jsonText = JSON.stringify(data, null, 2);
-                    
-                    try {
-                        // Try modern clipboard API first
-                        await navigator.clipboard.writeText(jsonText);
-                        copyBtn.textContent = '✅ Copied!';
-                        setTimeout(() => {
-                            copyBtn.textContent = '📋 Copy to Clipboard';
-                        }, 2000);
-                    } catch (err) {
-                        // Fallback for older browsers or failed clipboard access
-                        const textArea = document.createElement('textarea');
-                        textArea.value = jsonText;
-                        textArea.style.position = 'fixed';
-                        textArea.style.left = '-999999px';
-                        document.body.appendChild(textArea);
-                        textArea.select();
-                        try {
-                            document.execCommand('copy');
-                            copyBtn.textContent = '✅ Copied!';
-                            setTimeout(() => {
-                                copyBtn.textContent = '📋 Copy to Clipboard';
-                            }, 2000);
-                        } catch (err2) {
-                            alert('Copy failed. Please copy manually from the preview below.');
-                        }
-                        document.body.removeChild(textArea);
-                    }
+            console.log('[EXPORT] Setting up JSON download button');
+            if (exportBtn) {
+                exportBtn.onclick = () => {
+                    console.log('[EXPORT] JSON download button clicked');
+                    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'brickonizer_export.json';
+                    a.click();
+                    console.log('[EXPORT] JSON download triggered');
                 };
+                console.log('[EXPORT] JSON button handler attached');
+            } else {
+                console.error('[EXPORT] JSON button not found!');
             }
             
-            // Get unrecognized parts
+            // Add BrickLink XML export button
+            console.log('[EXPORT] Setting up BrickLink XML button');
+            const bricklinkBtn = document.getElementById('export-bricklink-btn');
+            if (bricklinkBtn) {
+                bricklinkBtn.onclick = () => {
+                    console.log('[EXPORT] BrickLink XML button clicked');
+                    window.location.href = '/export_bricklink_xml';
+                };
+                console.log('[EXPORT] BrickLink button handler attached');
+            } else {
+                console.error('[EXPORT] BrickLink button not found!');
+            }
+            
+            // Copy button now uses global function defined at top of file via HTML onclick attribute
+            
+            // Get unrecognized parts - check which parts were actually exported
+            const exportedPartNums = new Set(data.parts.map(p => p.partNum));
+            
             const resultsResponse = await fetch('/get_results');
             if (resultsResponse.ok) {
                 const resultsData = await resultsResponse.json();
-                const unrecognized = resultsData.results.filter(r => !r.recognized || (r.recognized && !r.part_id));
                 
-                if (unrecognized.length > 0) {
-                    let unrecognizedHTML = `
-                        <div class="unrecognized-section">
-                            <h3>⚠️ Unrecognized Parts</h3>
-                            <p>You will need to add these parts manually in brickIsbrick.com:</p>
-                            <div class="unrecognized-grid">
-                    `;
-                    
-                    unrecognized.forEach((part, idx) => {
-                        unrecognizedHTML += `
-                            <div class="unrecognized-part">
-                                <img src="data:image/jpeg;base64,${part.crop_image}" alt="Part ${idx + 1}">
-                                <p>Part ${idx + 1} from ${part.image_name}</p>
-                            </div>
-                        `;
+                // Only show parts that:
+                // 1. Were not exported (not in exportedPartNums)
+                // 2. Are counted in unrecognizedCount or skippedCount
+                const totalProcessed = data.recognizedParts;
+                const totalParts = data.totalParts;
+                const shouldShowUnrecognized = data.unrecognizedCount > 0 || data.skippedCount > 0;
+                
+                if (shouldShowUnrecognized) {
+                    // Find parts that weren't exported
+                    const unrecognized = resultsData.results.filter((r, idx) => {
+                        // Check if this part was exported
+                        const wasExported = data.parts.some(p => {
+                            // Match by index would be ideal, but we can check if it exists in export
+                            return true; // We'll filter by what's NOT in the export
+                        });
+                        
+                        // Part is unrecognized if it's not in the recognized parts list
+                        return idx >= totalProcessed || (!r.recognized && !exportedPartNums.has(r.part_id));
                     });
                     
-                    unrecognizedHTML += `
+                    if (unrecognized.length > 0) {
+                        let unrecognizedHTML = `
+                            <div class="unrecognized-section">
+                                <h3>⚠️ Unrecognized Parts</h3>
+                                <p>These ${unrecognized.length} part(s) were not exported (skipped or unknown):</p>
+                                <div class="unrecognized-grid">
+                        `;
+                        
+                        unrecognized.forEach((part, idx) => {
+                            unrecognizedHTML += `
+                                <div class="unrecognized-part">
+                                    <img src="data:image/jpeg;base64,${part.crop_image}" alt="Part ${idx + 1}">
+                                    <p>Part ${part.index + 1} from ${part.image_name}</p>
+                                </div>
+                            `;
+                        });
+                        
+                        unrecognizedHTML += `
+                                </div>
                             </div>
+                        `;
+                        
+                        exportContent.innerHTML += unrecognizedHTML;
+                    }
+                } else if (data.recognizedParts === data.totalParts) {
+                    // All parts were successfully processed
+                    let successHTML = `
+                        <div class="success-section" style="margin-top: 20px; padding: 20px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px; color: #155724;">
+                            <h3>✅ All Parts Successfully Processed!</h3>
+                            <p>All ${data.totalParts} parts have been recognized and exported.</p>
                         </div>
                     `;
-                    
-                    exportContent.innerHTML += unrecognizedHTML;
+                    exportContent.innerHTML += successHTML;
                 }
             }
         }
@@ -1233,6 +1494,7 @@ async function loadExport() {
 // Make functions global for onclick handlers
 window.savePart = savePart;
 window.skipPart = skipPart;
+window.removePartFromList = removePartFromList;
 window.unknownPart = unknownPart;
 window.nextPart = nextPart;
 window.previousPart = previousPart;
@@ -1265,11 +1527,145 @@ document.addEventListener('click', function(event) {
     }
 });
 
+async function autoDetectQuantity() {
+    const part = appState.reviewData[appState.currentReviewIndex];
+    const quantityInput = document.getElementById('quantity-input');
+    const quantityInfo = document.getElementById('quantity-info');
+    
+    if (!part || !part.box) {
+        console.log('[QUANTITY] No box data available for auto-detection');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/detect_quantity', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filename: part.image_name,
+                box: part.box
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.quantity) {
+            // Update quantity input
+            quantityInput.value = data.quantity;
+            
+            // Show info message
+            if (quantityInfo) {
+                quantityInfo.style.display = 'block';
+            }
+            
+            // Visual feedback
+            quantityInput.style.background = '#d4edda';
+            setTimeout(() => {
+                quantityInput.style.background = '';
+            }, 1500);
+            
+            console.log('[QUANTITY] Auto-detected:', data.quantity);
+        } else {
+            console.log('[QUANTITY] Auto-detection failed:', data.message || 'No quantity found');
+        }
+    } catch (error) {
+        console.error('[QUANTITY] Auto-detection error:', error);
+    }
+}
+
+async function detectQuantity() {
+    const part = appState.reviewData[appState.currentReviewIndex];
+    const btn = document.getElementById('detect-qty-btn');
+    const quantityInput = document.getElementById('quantity-input');
+    
+    console.log('[QUANTITY] Part data:', part);
+    console.log('[QUANTITY] Box:', part.box);
+    
+    if (!part || !part.box) {
+        console.error('[QUANTITY] ERROR: No box data available');
+        console.log('[QUANTITY] Full part object:', JSON.stringify(part, null, 2));
+        alert('No box information available for this part');
+        return;
+    }
+    
+    // Show loading state
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '⏳ Detecting...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch('/detect_quantity', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filename: part.image_name,
+                box: part.box
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.quantity) {
+            // Update quantity input
+            quantityInput.value = data.quantity;
+            
+            // Show success feedback
+            btn.innerHTML = `✓ Found: ${data.quantity}x`;
+            btn.style.background = '#28a745';
+            
+            // Visual feedback
+            quantityInput.style.background = '#d4edda';
+            setTimeout(() => {
+                quantityInput.style.background = '';
+            }, 1000);
+            
+            console.log('[QUANTITY] Detected:', data);
+            
+            // Reset button after 2 seconds
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.style.background = '';
+                btn.disabled = false;
+            }, 2000);
+        } else {
+            // No quantity found
+            btn.innerHTML = '✗ Not found';
+            btn.style.background = '#ffc107';
+            
+            console.log('[QUANTITY] Not detected:', data);
+            
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.style.background = '';
+                btn.disabled = false;
+            }, 2000);
+        }
+    } catch (error) {
+        console.error('Error detecting quantity:', error);
+        btn.innerHTML = '✗ Error';
+        btn.style.background = '#dc3545';
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.style.background = '';
+            btn.disabled = false;
+        }, 2000);
+    }
+}
+
 window.toggleColorDropdown = toggleColorDropdown;
 window.selectColor = selectColor;
 window.selectQuickColor = selectQuickColor;
-window.showOriginalImage = showOriginalImage;
-window.closeOriginalImage = closeOriginalImage;
+window.showOriginalImageOnHover = showOriginalImageOnHover;
+window.hideOriginalImageOnHover = hideOriginalImageOnHover;
+window.clearImageModalTimeout = clearImageModalTimeout;
 window.toggleOftenSidebar = toggleOftenSidebar;
 window.useOftenPart = useOftenPart;
 window.incrementQuantity = incrementQuantity;
+window.detectQuantity = detectQuantity;
+window.chooseAlternativePart = chooseAlternativePart;
+window.noMatchPart = noMatchPart;

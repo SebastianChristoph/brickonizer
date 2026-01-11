@@ -14,10 +14,17 @@ import cv2
 import uuid
 from datetime import datetime
 import fitz  # PyMuPDF
+import pytesseract
 
 from models import BoundingBox, ProcessedPart, ImageSession
 from services import ImageProcessor, get_api_instance
 from utils.bricklink_colors import BricklinkColorMap
+
+# Configure Tesseract path for Windows
+if os.name == 'nt':  # Windows
+    tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    if os.path.exists(tesseract_path):
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 app = Flask(__name__)
 
@@ -234,6 +241,30 @@ def convert_pdf_pages():
         return jsonify({'error': f'Conversion failed: {str(e)}'}), 500
 
 
+@app.route('/get_often_parts')
+def get_often_parts():
+    """Get list of often unrecognized parts from static/often folder"""
+    import os
+    often_dir = os.path.join(app.static_folder, 'often')
+    
+    if not os.path.exists(often_dir):
+        return jsonify({'parts': []})
+    
+    parts = []
+    for filename in os.listdir(often_dir):
+        if filename.endswith('.png'):
+            part_num = filename.replace('.png', '')
+            parts.append({
+                'number': part_num,
+                'image': f'/static/often/{filename}'
+            })
+    
+    # Sort by part number
+    parts.sort(key=lambda x: x['number'])
+    
+    return jsonify({'parts': parts})
+
+
 @app.route('/image/<filename>')
 def get_image(filename):
     """Serve uploaded image"""
@@ -299,6 +330,256 @@ def get_boxes(filename):
         })
     
     return jsonify({'boxes': boxes})
+
+
+@app.route('/crop_text_from_boxes', methods=['POST'])
+def crop_text_from_boxes():
+    """Crop boxes to remove text annotations like '2x', '4x' using OCR"""
+    session_id = session.get('session_id')
+    if not session_id or session_id not in sessions:
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    data = request.json
+    filename = data.get('filename')
+    boxes = data.get('boxes', [])
+    
+    if not filename or filename not in sessions[session_id]['images']:
+        return jsonify({'error': 'Image not found'}), 404
+    
+    if not boxes:
+        return jsonify({'success': True, 'boxes': [], 'modified': 0})
+    
+    try:
+        # Load image
+        image_path = sessions[session_id]['images'][filename]['filepath']
+        img = cv2.imread(image_path)
+        
+        if img is None:
+            return jsonify({'error': f'Failed to load image from {image_path}'}), 500
+        
+        modified_boxes = []
+        modified_count = 0
+        debug_info = []
+        
+        for idx, box in enumerate(boxes):
+            x, y, w, h = int(box['x']), int(box['y']), int(box['width']), int(box['height'])
+            
+            # Extract box region
+            box_img = img[y:y+h, x:x+w]
+            
+            # ONLY analyze the BOTTOM 40% of the box (where text typically is)
+            text_region_start = int(h * 0.6)
+            text_region = box_img[text_region_start:, :]
+            
+            # Upscale 3x for better OCR
+            scale = 3
+            text_region_large = cv2.resize(text_region, None, fx=scale, fy=scale, 
+                                          interpolation=cv2.INTER_CUBIC)
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(text_region_large, cv2.COLOR_BGR2GRAY)
+            
+            # Apply strong threshold to get black text on white background
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            all_detections = []
+            best_text_y = None
+            best_text = None
+            text_found = False
+            
+            try:
+                # Use PSM 7 (single text line) since quantities are always single line
+                ocr_text = pytesseract.image_to_string(thresh, config='--psm 7').strip()
+                all_detections.append(f"full:{ocr_text[:30]}")
+                
+                # Get detailed position data
+                ocr_data = pytesseract.image_to_data(thresh, config='--psm 7',
+                                                     output_type=pytesseract.Output.DICT)
+                
+                for i in range(len(ocr_data['text'])):
+                    text = str(ocr_data['text'][i]).strip()
+                    conf = int(ocr_data['conf'][i]) if ocr_data['conf'][i] != '-1' else 0
+                    
+                    if text and conf > 10:
+                        all_detections.append(f"{text}({conf}%)")
+                        
+                        # Look for patterns: "Nx" or just "N" where N is 1-3 digits
+                        text_lower = text.lower()
+                        is_quantity = ('x' in text_lower) or (text.replace('i', '1').replace('l', '1').isdigit() and 1 <= len(text) <= 3)
+                        
+                        if is_quantity:
+                            # Convert to scaled coordinates
+                            text_y_scaled = int(ocr_data['top'][i])
+                            # Convert back to original image coords
+                            text_y_original = text_region_start + (text_y_scaled // scale)
+                            
+                            if best_text_y is None or text_y_original < best_text_y:
+                                best_text_y = text_y_original
+                                best_text = text
+                                text_found = True
+                
+            except Exception as e:
+                all_detections.append(f"ERROR: {str(e)[:50]}")
+            
+            debug_info.append({
+                'box': idx + 1,
+                'detections': all_detections,
+                'text_found': text_found,
+                'best_text': best_text,
+                'best_y': best_text_y
+            })
+            
+            # If text was found, crop the box
+            if text_found and best_text_y is not None and best_text_y > 10:
+                # Extend box slightly BELOW the top of the text (add padding instead of subtract)
+                relative_padding = max(4, int(h * 0.06))  # 6% of height to go slightly below text start
+                new_height = best_text_y + relative_padding  # ADD padding to go below text
+                
+                if 20 < new_height < h * 0.95:
+                    modified_boxes.append({
+                        'x': x,
+                        'y': y,
+                        'width': w,
+                        'height': new_height
+                    })
+                    modified_count += 1
+                else:
+                    modified_boxes.append(box)
+            else:
+                modified_boxes.append(box)
+        
+        return jsonify({
+            'success': True, 
+            'boxes': modified_boxes, 
+            'modified': modified_count,
+            'total': len(boxes)
+        })
+    
+    except ImportError:
+        return jsonify({'error': 'pytesseract not available'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/detect_quantity', methods=['POST'])
+def detect_quantity():
+    """Detect quantity text (like '2x', '3x') below a bounding box"""
+    session_id = session.get('session_id')
+    if not session_id or session_id not in sessions:
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    data = request.json
+    filename = data.get('filename')
+    box = data.get('box')  # {x, y, width, height}
+    
+    if not filename or not box:
+        return jsonify({'error': 'Missing filename or box'}), 400
+    
+    if filename not in sessions[session_id]['images']:
+        return jsonify({'error': 'Image not found'}), 404
+    
+    try:
+        # Load image
+        image_path = sessions[session_id]['images'][filename]['filepath']
+        img = cv2.imread(image_path)
+        
+        if img is None:
+            return jsonify({'error': f'Failed to load image'}), 500
+        
+        img_height, img_width = img.shape[:2]
+        
+        x = int(box['x'])
+        y = int(box['y'])
+        w = int(box['width'])
+        h = int(box['height'])
+        
+        # Extract region BELOW the box (half of box height)
+        region_height = int(h * 0.5)
+        region_y = y + h  # Start right below the box
+        region_x = x
+        region_w = w
+        
+        # Ensure we don't go out of bounds
+        if region_y + region_height > img_height:
+            region_height = img_height - region_y
+        
+        if region_height < 10:
+            return jsonify({
+                'success': False,
+                'quantity': None,
+                'message': 'Region too small'
+            })
+        
+        # Extract the region
+        region = img[region_y:region_y+region_height, region_x:region_x+region_w]
+        
+        # Upscale 3x for better OCR
+        scale = 3
+        region_large = cv2.resize(region, None, fx=scale, fy=scale, 
+                                  interpolation=cv2.INTER_CUBIC)
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(region_large, cv2.COLOR_BGR2GRAY)
+        
+        # Apply threshold
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Try OCR
+        try:
+            # Use PSM 7 for single line
+            ocr_text = pytesseract.image_to_string(thresh, config='--psm 7').strip()
+            
+            # Look for quantity patterns: "2x", "11x", "41x", etc.
+            import re
+            
+            # Pattern: digits followed by 'x' (case insensitive)
+            # Also handle common OCR mistakes: 'i', 'l' as '1', 'o' as '0'
+            ocr_cleaned = ocr_text.lower().replace('i', '1').replace('l', '1').replace('o', '0')
+            
+            # Find patterns like "2x" or "11x"
+            match = re.search(r'(\d{1,3})\s*x', ocr_cleaned)
+            
+            if match:
+                quantity = int(match.group(1))
+                
+                return jsonify({
+                    'success': True,
+                    'quantity': quantity,
+                    'raw_text': ocr_text,
+                    'cleaned_text': ocr_cleaned
+                })
+            else:
+                # Try to find just digits without 'x'
+                digits_match = re.search(r'\b(\d{1,2})\b', ocr_cleaned)
+                if digits_match:
+                    quantity = int(digits_match.group(1))
+                    if 1 <= quantity <= 99:
+                        return jsonify({
+                            'success': True,
+                            'quantity': quantity,
+                            'raw_text': ocr_text,
+                            'cleaned_text': ocr_cleaned,
+                            'note': 'Found digits without x'
+                        })
+                
+                return jsonify({
+                    'success': False,
+                    'quantity': None,
+                    'raw_text': ocr_text,
+                    'message': 'No quantity pattern found'
+                })
+                
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'quantity': None,
+                'error': str(e)
+            })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/auto_detect_boxes', methods=['POST'])
@@ -391,15 +672,12 @@ def get_analysis_progress():
 @app.route('/analyze', methods=['POST'])
 def analyze_parts():
     """Analyze all marked parts"""
-    print("=== ANALYZE REQUEST RECEIVED ===")
     session_id = session.get('session_id')
     if not session_id or session_id not in sessions:
-        print(f"ERROR: Invalid session - session_id={session_id}")
         return jsonify({'error': 'Invalid session'}), 400
     
     session_data = sessions[session_id]
     all_parts = []
-    print(f"Session has {len(session_data['images'])} images")
     
     # Collect all parts from all images
     for filename, image_data in session_data['images'].items():
@@ -519,6 +797,12 @@ def get_results():
                 'y': part.bounding_box.y,
                 'width': part.bounding_box.width,
                 'height': part.bounding_box.height
+            },
+            'box': {
+                'x': part.bounding_box.x,
+                'y': part.bounding_box.y,
+                'width': part.bounding_box.width,
+                'height': part.bounding_box.height
             }
         }
         
@@ -584,6 +868,30 @@ def update_part():
     
     return jsonify({'error': 'Part not found'}), 404
 
+@app.route('/remove_part', methods=['POST'])
+def remove_part():
+    """Remove a part from the analyzed parts list"""
+    session_id = session.get('session_id')
+    if not session_id or session_id not in sessions:
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    data = request.json
+    part_idx = data.get('index')
+    
+    parts = sessions[session_id].get('analyzed_parts', [])
+    
+    if part_idx is not None and 0 <= part_idx < len(parts):
+        # Remove the part from the list
+        removed_part = parts.pop(part_idx)
+        
+        return jsonify({
+            'success': True,
+            'new_total': len(parts),
+            'removed_index': part_idx
+        })
+    
+    return jsonify({'error': 'Part not found'}), 404
+
 
 @app.route('/export')
 def export_json():
@@ -602,10 +910,7 @@ def export_json():
                     os.remove(fpath)
                     deleted_files += 1
         except Exception as e:
-            print(f"[Cleanup] Could not delete {fpath}: {e}")
-    
-    if deleted_files > 0:
-        print(f"[Cleanup] Deleted {deleted_files} old file(s) from uploads folder")
+            pass
     
     session_id = session.get('session_id')
     if not session_id or session_id not in sessions:
@@ -626,22 +931,40 @@ def export_json():
             elif part.user_data.get('part_num'):
                 # Get color ID - convert name to ID if needed
                 color_value = part.user_data.get('color_id')
-                color_id = color_value
+                color_id = None
                 
                 # Check if it's a color name instead of ID
                 if color_value:
                     colors = BricklinkColorMap.get_all_colors()
-                    # Try to find by name
-                    for cid, (name, rgb) in colors.items():
-                        if name == color_value:
-                            color_id = cid
-                            break
+                    
+                    # If color_value is already an integer, use it
+                    if isinstance(color_value, int):
+                        color_id = color_value
+                    # If it's a string that looks like a number, convert it
+                    elif isinstance(color_value, str) and color_value.isdigit():
+                        color_id = int(color_value)
+                    else:
+                        # Try to find by name
+                        for cid, (name, rgb) in colors.items():
+                            if name == color_value:
+                                color_id = cid
+                                break
+                
+                # Ensure color_id is either None or int, never string
+                if color_id is not None and not isinstance(color_id, int):
+                    color_id = None
+                
+                # Get original name and clean it
+                original_name = 'Unknown'
+                if part.recognition_result and part.recognition_result.part_name:
+                    # Remove non-ASCII characters to prevent JSON parse errors
+                    original_name = part.recognition_result.part_name.encode('ascii', 'ignore').decode('ascii')
                 
                 valid_parts.append({
                     'partNum': part.user_data['part_num'],
                     'colorId': color_id if color_id is not None else None,
                     'quantity': part.user_data['quantity'],
-                    'originalName': part.recognition_result.part_name if part.recognition_result else 'Unknown',
+                    'originalName': original_name,
                     'confidence': part.recognition_result.confidence if part.recognition_result else 0.0
                 })
     
@@ -654,6 +977,66 @@ def export_json():
     }
     
     return jsonify(result)
+
+
+@app.route('/export_bricklink_xml')
+def export_bricklink_xml():
+    """Export as BrickLink XML format"""
+    session_id = session.get('session_id')
+    if not session_id or session_id not in sessions:
+        return 'Invalid session', 400
+    
+    parts = sessions[session_id].get('analyzed_parts', [])
+    
+    # Build XML
+    xml_parts = []
+    
+    for part in parts:
+        if hasattr(part, 'user_data'):
+            # Skip parts marked as skip, unknown or no_match
+            if part.user_data.get('skip') or part.user_data.get('unknown') or part.user_data.get('no_match'):
+                continue
+            
+            part_num = part.user_data.get('part_num')
+            color_value = part.user_data.get('color_id')
+            quantity = part.user_data.get('quantity', 1)
+            
+            if not part_num:
+                continue
+            
+            # Convert color name to ID if needed
+            color_id = color_value
+            if color_value:
+                colors = BricklinkColorMap.get_all_colors()
+                for cid, (name, rgb) in colors.items():
+                    if name == color_value:
+                        color_id = cid
+                        break
+            
+            # Create XML item
+            xml_item = f'''<ITEM>
+<ITEMTYPE>P</ITEMTYPE>
+<ITEMID>{part_num}</ITEMID>
+<COLOR>{color_id if color_id else 0}</COLOR>
+<MAXPRICE>-1.0000</MAXPRICE>
+<MINQTY>{quantity}</MINQTY>
+<CONDITION>X</CONDITION>
+<NOTIFY>N</NOTIFY>
+</ITEM>'''
+            xml_parts.append(xml_item)
+    
+    # Build complete XML
+    xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n<INVENTORY>\n'
+    xml_content += '\n'.join(xml_parts)
+    xml_content += '\n</INVENTORY>'
+    
+    # Create response with download
+    from flask import make_response
+    response = make_response(xml_content)
+    response.headers['Content-Type'] = 'application/xml'
+    response.headers['Content-Disposition'] = 'attachment; filename=bricklink_wanted_list.xml'
+    
+    return response
 
 
 @app.route('/colors')

@@ -30,3 +30,4 @@ build/
 
 # Environment variables
 .env
+uploads/

@@ -406,6 +406,10 @@ class CanvasDrawer {
         this.redraw();
     }
     
+    getBoxes() {
+        return this.boxes;
+    }
+    
     getBoxCount() {
         return this.boxes.length;
     }

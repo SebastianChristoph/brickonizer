@@ -108,19 +108,6 @@ class ImageProcessor:
             # Enhance contrast for better OCR
             gray = cv2.equalizeHist(gray)
             
-            # DEBUG: Save first few crops for inspection
-            import os
-            debug_dir = 'debug_crops'
-            if not hasattr(ImageProcessor, '_debug_count'):
-                ImageProcessor._debug_count = 0
-                os.makedirs(debug_dir, exist_ok=True)
-            
-            if ImageProcessor._debug_count < 3:
-                debug_path = os.path.join(debug_dir, f'crop_{ImageProcessor._debug_count}.png')
-                cv2.imwrite(debug_path, image)
-                print(f"[Text Removal DEBUG] Saved crop to {debug_path}")
-                ImageProcessor._debug_count += 1
-            
             # Use pytesseract to detect text bounding boxes
             # config: only recognize digits and 'x' character, treat as single uniform block
             custom_config = r'--psm 11 -c tessedit_char_whitelist=0123456789xX'

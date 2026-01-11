@@ -1,9 +1,0 @@
-part_number,part_name,color,quantity,confidence,x,y,width,height
-3001,Brick 2 x 4,Red,11,95.2%,120,45,180,220
-3004,Brick 1 x 2,Blue,8,92.8%,350,50,150,200
-3622,Brick 1 x 3,Trans-Neon Orange,1,89.4%,520,55,160,210
-N/A,Unknown,Unknown,2,N/A,680,60,170,215
-3023,Plate 1 x 2,Light Bluish Gray,16,97.1%,125,300,145,180
-3710,Plate 1 x 4,Dark Bluish Gray,4,93.5%,290,305,175,185
-N/A,Recognition failed,N/A,1,N/A,465,310,155,190
-6091,Brick 2 x 1 x 1.33 with Curved Top,Red,3,88.7%,640,315,140,195

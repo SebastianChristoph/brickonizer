@@ -370,6 +370,7 @@ h2 {
     background: rgba(0, 0, 0, 0.9);
     z-index: 3000;
     padding: 20px;
+    pointer-events: none;
 }
 
 .original-image-modal.active {
@@ -382,6 +383,7 @@ h2 {
     max-width: 95%;
     max-height: 95%;
     position: relative;
+    pointer-events: auto;
 }
 
 .original-image-content img {
