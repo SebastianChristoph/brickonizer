@@ -1738,7 +1738,7 @@ function showLastError() {
     }
 }
 
-async function copyErrorToClipboard() {
+async function copyErrorToClipboard(event) {
     if (!window.currentErrorDetails) return;
     
     const errorText = `
@@ -1756,16 +1756,21 @@ Please send this error report to the administrator.
     try {
         await navigator.clipboard.writeText(errorText);
         
-        // Visual feedback
-        const btn = event.target;
-        const originalText = btn.textContent;
-        btn.textContent = '✓ Copied!';
-        btn.style.background = '#28a745';
-        
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.background = '';
-        }, 2000);
+        // Visual feedback - find the button
+        const btn = event ? event.target : document.querySelector('#error-modal button');
+        if (btn) {
+            const originalText = btn.textContent;
+            const originalBg = btn.style.background;
+            btn.textContent = '✓ Copied!';
+            btn.style.background = '#28a745';
+            
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.background = originalBg;
+            }, 2000);
+        } else {
+            alert('Error details copied to clipboard!');
+        }
     } catch (err) {
         console.error('Failed to copy:', err);
         alert('Could not copy to clipboard. Please manually copy the error details above.');
