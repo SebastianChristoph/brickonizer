@@ -999,7 +999,7 @@ function displayReviewPart() {
                     </div>
                     ${part.api_image_url ? `
                     <div style="width: 120px; text-align: center;">
-                        <p style="margin: 0 0 5px 0; font-size: 13px;"><strong>API Reference:</strong></p>
+                        <p style="margin: 0 0 5px 0; font-size: 13px;"><strong>App Suggestion:</strong></p>
                         <img src="${part.api_image_url}" style="width: 120px; height: 120px; object-fit: contain; border: 2px solid #28a745; border-radius: 8px;" onerror="this.style.display='none'">
                     </div>
                     ` : ''}

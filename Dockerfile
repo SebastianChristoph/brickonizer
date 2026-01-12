@@ -34,6 +34,7 @@ HEALTHCHECK CMD curl --fail http://localhost:5000/ || exit 1
 ENV PYTHONUNBUFFERED=1
 ENV FLASK_ENV=production
 
-# Run Flask
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "--timeout", "300", "flask_app:app"]
+# Run Flask with 1 worker but 4 threads to allow parallel progress polling
+# Threads share memory (including sessions dict), workers don't!
+CMD ["gunicorn", "-w", "1", "--threads", "4", "-b", "0.0.0.0:5000", "--timeout", "300", "flask_app:app"]
 
