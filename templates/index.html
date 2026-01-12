@@ -66,7 +66,7 @@
                     <h3 style="margin: 0 0 10px 0; color: #667eea; font-size: 16px;">📝 How to mark parts:</h3>
                     <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
                         <li><strong>Select an image</strong> from your uploaded list (click on thumbnail above)</li>
-                        <li><strong>Draw rectangles</strong> around each LEGO part by clicking and dragging</li>
+                        <li><strong>Draw rectangles</strong> around each part by clicking and dragging - <strong>Please do not include mini figure parts</strong></li>
                         <li><strong>Be precise:</strong> Frame parts tightly, avoid text/numbers like "2x", "3x"</li>
                         <li><strong>Use Auto Detect</strong> below for automatic box placement (you can adjust after)</li>
                         <li><strong>Adjust box size if needed:</strong> Hover over box edges to resize - grab and drag any side</li>
@@ -102,7 +102,7 @@
                 <div class="analyze-section">
                     <div style="margin-bottom: 10px; text-align: center;">
                         <input type="checkbox" id="no-text-checkbox" style="margin-right: 8px;">
-                        <label for="no-text-checkbox" style="font-size: 15px;">I checked that I did not accidentally mark text (e.g. "2x") as a part.</label>
+                        <label for="no-text-checkbox" style="font-size: 15px;">I checked that I did not accidentally mark text (e.g. "2x") as a part, adjusted all boxes and did not include mini figure parts.</label>
                     </div>
                     <button id="analyze-btn" class="btn btn-primary" disabled>
                         Analyze All Parts with the help of brickognize.com
@@ -145,6 +145,31 @@
                 </div>
                 <h3 style="margin-top: 20px;">JSON Preview</h3>
                 <pre id="json-preview"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Display Modal -->
+    <div id="error-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 12px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #f44336;">
+                <span style="font-size: 32px; margin-right: 15px;">⚠️</span>
+                <h2 style="margin: 0; color: #f44336; flex: 1;">Error Details</h2>
+                <button onclick="closeErrorModal()" style="background: none; border: none; font-size: 28px; color: #999; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
+            </div>
+            <div id="error-content" style="margin-bottom: 20px;">
+                <div style="background: #fff3f3; border-left: 4px solid #f44336; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
+                    <strong style="color: #d32f2f;">Error Message:</strong>
+                    <p id="error-message" style="margin: 10px 0 0 0; word-break: break-word;"></p>
+                </div>
+                <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 10px;">
+                    <strong>Technical Details:</strong>
+                    <pre id="error-details" style="margin: 10px 0 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: 'Courier New', monospace; max-height: 300px; overflow-y: auto;"></pre>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="copyErrorToClipboard()">📋 Copy Error Details</button>
+                <button class="btn btn-primary" onclick="closeErrorModal()">Close</button>
             </div>
         </div>
     </div>

@@ -605,7 +605,23 @@ async function analyzeAllParts() {
                 switchTab('results');
             }, 2000);
         } else {
-            throw new Error('Analysis failed');
+            // Get detailed error information
+            let errorDetails = {
+                status: response.status,
+                statusText: response.statusText,
+                url: response.url,
+                timestamp: new Date().toISOString()
+            };
+            
+            try {
+                const errorData = await response.json();
+                errorDetails.serverMessage = errorData.error || errorData.message;
+            } catch (e) {
+                errorDetails.serverMessage = await response.text();
+            }
+            
+            showErrorModal('Analysis Request Failed', errorDetails);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
     } catch (error) {
         console.error('Analysis error:', error);
@@ -614,7 +630,19 @@ async function analyzeAllParts() {
         analyzeBtn.style.display = 'block';
         analyzeBtn.disabled = false;
         statusDiv.className = 'error';
-        statusDiv.textContent = 'Error during analysis!';
+        statusDiv.innerHTML = 'Error during analysis! <button onclick="showLastError()" style="margin-left: 10px; padding: 8px 15px; cursor: pointer; background: #f44336; color: white; border: none; border-radius: 4px; font-weight: 500;">Show Details</button>';
+        statusDiv.style.display = 'flex';
+        statusDiv.style.alignItems = 'center';
+        statusDiv.style.justifyContent = 'center';
+        statusDiv.style.gap = '10px';
+        
+        // Store error details for later retrieval
+        window.lastAnalysisError = {
+            message: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString(),
+            type: error.name || 'Error'
+        };
     }
 }
 
@@ -1668,3 +1696,76 @@ window.incrementQuantity = incrementQuantity;
 window.detectQuantity = detectQuantity;
 window.chooseAlternativePart = chooseAlternativePart;
 window.noMatchPart = noMatchPart;
+
+// Error Modal Functions
+function showErrorModal(errorMessage, errorDetails) {
+    const modal = document.getElementById('error-modal');
+    const messageEl = document.getElementById('error-message');
+    const detailsEl = document.getElementById('error-details');
+    
+    messageEl.textContent = errorMessage;
+    
+    // Format error details nicely
+    const detailsText = JSON.stringify(errorDetails, null, 2);
+    detailsEl.textContent = detailsText;
+    
+    // Store for clipboard
+    window.currentErrorDetails = {
+        message: errorMessage,
+        details: errorDetails,
+        timestamp: new Date().toISOString()
+    };
+    
+    modal.style.display = 'block';
+}
+
+function closeErrorModal() {
+    const modal = document.getElementById('error-modal');
+    modal.style.display = 'none';
+}
+
+function showLastError() {
+    if (window.lastAnalysisError) {
+        showErrorModal('Analysis Error', window.lastAnalysisError);
+    }
+}
+
+async function copyErrorToClipboard() {
+    if (!window.currentErrorDetails) return;
+    
+    const errorText = `
+=== ERROR REPORT ===
+Timestamp: ${window.currentErrorDetails.timestamp}
+Message: ${window.currentErrorDetails.message}
+
+Technical Details:
+${JSON.stringify(window.currentErrorDetails.details, null, 2)}
+
+Please send this error report to the administrator.
+===================
+`.trim();
+    
+    try {
+        await navigator.clipboard.writeText(errorText);
+        
+        // Visual feedback
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        btn.style.background = '#28a745';
+        
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.style.background = '';
+        }, 2000);
+    } catch (err) {
+        console.error('Failed to copy:', err);
+        alert('Could not copy to clipboard. Please manually copy the error details above.');
+    }
+}
+
+// Make functions globally accessible
+window.showErrorModal = showErrorModal;
+window.closeErrorModal = closeErrorModal;
+window.showLastError = showLastError;
+window.copyErrorToClipboard = copyErrorToClipboard;
