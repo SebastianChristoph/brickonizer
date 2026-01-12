@@ -613,11 +613,19 @@ async function analyzeAllParts() {
                 timestamp: new Date().toISOString()
             };
             
+            // Read response body once as text
             try {
-                const errorData = await response.json();
-                errorDetails.serverMessage = errorData.error || errorData.message;
+                const responseText = await response.text();
+                // Try to parse as JSON
+                try {
+                    const errorData = JSON.parse(responseText);
+                    errorDetails.serverMessage = errorData.error || errorData.message || responseText;
+                } catch (e) {
+                    // Not JSON, use raw text
+                    errorDetails.serverMessage = responseText || 'No error message provided';
+                }
             } catch (e) {
-                errorDetails.serverMessage = await response.text();
+                errorDetails.serverMessage = 'Could not read error response';
             }
             
             showErrorModal('Analysis Request Failed', errorDetails);
