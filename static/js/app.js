@@ -544,6 +544,18 @@ async function analyzeAllParts() {
     const progressText = document.getElementById('analyze-progress-text');
     const progressBar = document.getElementById('analyze-progress-bar');
     
+    // Check if analysis is already in progress
+    try {
+        const checkResponse = await fetch('/analysis_progress');
+        const checkData = await checkResponse.json();
+        if (checkData.in_progress) {
+            alert('⚠️ Analysis already in progress!\n\nPlease wait for the current analysis to complete.\n\nThis can happen if you have multiple tabs open or started another analysis.');
+            return;
+        }
+    } catch (error) {
+        console.error('Error checking analysis status:', error);
+    }
+    
     // Show spinner, hide status, hide button
     spinner.style.display = 'block';
     analyzeBtn.style.display = 'none';
@@ -560,7 +572,7 @@ async function analyzeAllParts() {
             
             if (progress.total > 0) {
                 const remaining = progress.total - progress.current;
-                const timePerCall = 0.5; // seconds
+                const timePerCall = 0.33; // seconds (3 calls per second)
                 const estimatedSeconds = remaining * timePerCall;
                 const minutes = Math.floor(estimatedSeconds / 60);
                 const seconds = Math.round(estimatedSeconds % 60);
@@ -620,6 +632,12 @@ async function analyzeAllParts() {
                 try {
                     const errorData = JSON.parse(responseText);
                     errorDetails.serverMessage = errorData.error || errorData.message || responseText;
+                    
+                    // Check for 409 Conflict (analysis already running)
+                    if (response.status === 409) {
+                        alert('⚠️ Analysis already in progress!\n\n' + errorData.message + '\n\nThis can happen if you have multiple tabs open.');
+                        return;
+                    }
                 } catch (e) {
                     // Not JSON, use raw text
                     errorDetails.serverMessage = responseText || 'No error message provided';

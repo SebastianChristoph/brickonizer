@@ -663,10 +663,12 @@ def get_analysis_progress():
         return jsonify({'error': 'Invalid session'}), 400
     
     progress = sessions[session_id].get('analysis_progress')
+    in_progress = sessions[session_id].get('analysis_in_progress', False)
+    
     if progress:
-        return jsonify(progress)
+        return jsonify({**progress, 'in_progress': in_progress})
     else:
-        return jsonify({'current': 0, 'total': 0, 'percentage': 0})
+        return jsonify({'current': 0, 'total': 0, 'percentage': 0, 'in_progress': in_progress})
 
 
 @app.route('/analyze', methods=['POST'])
@@ -677,6 +679,13 @@ def analyze_parts():
         return jsonify({'error': 'Invalid session'}), 400
     
     session_data = sessions[session_id]
+    
+    # Check if analysis is already in progress
+    if session_data.get('analysis_in_progress', False):
+        return jsonify({
+            'error': 'Analysis already in progress',
+            'message': 'An analysis is already running in your browser session. Please wait for it to complete before starting a new one. (This can happen if you have multiple tabs open.)'
+        }), 409  # 409 Conflict
     all_parts = []
     
     # Collect all parts from all images
@@ -697,7 +706,8 @@ def analyze_parts():
             )
             all_parts.append(part)
     
-    # Initialize progress tracking
+    # Initialize progress tracking and set lock
+    session_data['analysis_in_progress'] = True
     session_data['analysis_progress'] = {'current': 0, 'total': len(all_parts), 'percentage': 0}
     
     # Run async analysis
@@ -708,6 +718,9 @@ def analyze_parts():
     
     # Store results
     session_data['analyzed_parts'] = all_parts
+    
+    # Clear lock
+    session_data['analysis_in_progress'] = False
     
     # Return summary
     total = len(all_parts)
