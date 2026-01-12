@@ -1800,3 +1800,41 @@ window.showErrorModal = showErrorModal;
 window.closeErrorModal = closeErrorModal;
 window.showLastError = showLastError;
 window.copyErrorToClipboard = copyErrorToClipboard;
+
+// Cancel Analysis Function
+async function cancelAnalysis() {
+    if (!confirm('Are you sure you want to cancel the analysis?\n\nYour boxes will be preserved and you can start a new analysis after adding missing parts.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/cancel_analysis', {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const statusDiv = document.getElementById('analyze-status');
+            const spinner = document.getElementById('analyze-spinner');
+            const analyzeBtn = document.getElementById('analyze-btn');
+            
+            // Hide spinner, show button
+            spinner.style.display = 'none';
+            analyzeBtn.style.display = 'block';
+            analyzeBtn.disabled = false;
+            
+            // Show cancellation message
+            statusDiv.className = 'error';
+            statusDiv.style.display = 'flex';
+            statusDiv.style.alignItems = 'center';
+            statusDiv.style.justifyContent = 'center';
+            statusDiv.textContent = '⚠️ Analysis cancelled. You can add more boxes and restart the analysis.';
+        } else {
+            alert('Failed to cancel analysis. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error cancelling analysis:', error);
+        alert('Failed to cancel analysis. Please try again.');
+    }
+}
+
+window.cancelAnalysis = cancelAnalysis;

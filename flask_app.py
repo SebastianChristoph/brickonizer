@@ -741,6 +741,11 @@ async def analyze_all_parts_async(parts, session_id):
     
     # Process parts sequentially with small delay to avoid overwhelming API
     for idx, part in enumerate(parts, 1):
+        # Check if analysis was cancelled
+        if session_id in sessions and sessions[session_id].get('analysis_cancelled', False):
+            print(f"Analysis cancelled by user at part {idx}/{total}")
+            break
+            
         try:
             # Update progress
             if session_id in sessions:
@@ -771,6 +776,23 @@ async def analyze_all_parts_async(parts, session_id):
     # Clear progress when done
     if session_id in sessions:
         sessions[session_id]['analysis_progress'] = None
+
+
+@app.route('/cancel_analysis', methods=['POST'])
+def cancel_analysis():
+    """Cancel ongoing analysis"""
+    session_id = session.get('session_id')
+    if not session_id or session_id not in sessions:
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    session_data = sessions[session_id]
+    
+    # Clear analysis flags
+    session_data['analysis_in_progress'] = False
+    session_data['analysis_progress'] = None
+    session_data['analysis_cancelled'] = True
+    
+    return jsonify({'success': True, 'message': 'Analysis cancelled'})
 
 
 @app.route('/results')
