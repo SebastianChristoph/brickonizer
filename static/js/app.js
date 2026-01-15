@@ -284,6 +284,14 @@ function initializeUpload() {
                 appState.uploadedImages = [...appState.uploadedImages, ...data.uploaded];
                 displayUploadedImages();
                 
+                // Show minifigure warning if this is the first upload
+                if (wasEmpty && appState.uploadedImages.length > 0) {
+                    const minifigWarning = document.getElementById('minifig-warning');
+                    if (minifigWarning) {
+                        minifigWarning.style.display = 'block';
+                    }
+                }
+                
                 // Auto-load first image if this was the first upload
                 if (wasEmpty && appState.uploadedImages.length > 0) {
                     setTimeout(() => {
@@ -393,6 +401,14 @@ async function convertSelectedPages() {
             // Add converted pages to uploaded images
             appState.uploadedImages = [...appState.uploadedImages, ...data.converted];
             displayUploadedImages();
+            
+            // Show minifigure warning if this is the first upload
+            if (wasEmpty && appState.uploadedImages.length > 0) {
+                const minifigWarning = document.getElementById('minifig-warning');
+                if (minifigWarning) {
+                    minifigWarning.style.display = 'block';
+                }
+            }
             
             // Auto-load first image if this was the first upload
             if (wasEmpty && appState.uploadedImages.length > 0) {
@@ -1001,7 +1017,14 @@ function displayReviewPart() {
             <p><strong>Confidence:</strong> ${(part.confidence * 100).toFixed(1)}%</p>
         `;
     } else {
-        partInfo = '<p style="color: red;"><strong>Not recognized</strong></p>';
+        partInfo = `
+            <p style="color: red; margin-bottom: 8px;"><strong>Not recognized</strong></p>
+            <div style="background: #e7f3ff; border-left: 3px solid #2196F3; padding: 10px; border-radius: 4px; font-size: 12px;">
+                <p style="margin: 0; color: #1976D2; line-height: 1.5;">
+                    <strong>💡 Tip:</strong> If this is a non-LEGO special brand piece: no worries! You can add it manually at <strong>brickisbrick.com</strong> later. Just click <strong>"Don't know"</strong> to skip for now.
+                </p>
+            </div>
+        `;
     }
     
     // Build color options with visual preview
@@ -1094,17 +1117,17 @@ function displayReviewPart() {
                             </div>
                         </div>
                         <div>
-                            <button class="btn btn-secondary" style="width: 100%; margin-bottom: 5px; padding: 6px 12px; font-size: 12px;" onmouseenter="showOriginalImageOnHover('${part.image_name}')" onmouseleave="hideOriginalImageOnHover()">
-                                🖼️ Show Original
-                            </button>
                             <label style="font-size: 12px; display: block; margin-bottom: 3px;">Quantity:</label>
                             <div style="display: flex; gap: 5px; margin-bottom: 3px;">
                                 <input type="number" id="quantity-input" value="1" min="1" style="flex: 1; padding: 6px;">
                                 <button class="btn btn-primary" onclick="incrementQuantity()" style="padding: 6px 12px; font-size: 16px; line-height: 1;">+</button>
                             </div>
-                            <div id="quantity-info" style="font-size: 10px; color: #6c757d; display: none; font-style: italic;">
+                            <div id="quantity-info" style="font-size: 10px; color: #6c757d; display: none; font-style: italic; margin-bottom: 5px;">
                                 ℹ️ Quantity read from image (may contain errors)
                             </div>
+                            <button class="btn btn-secondary" style="width: 100%; padding: 6px 12px; font-size: 12px;" onmouseenter="showOriginalImageOnHover('${part.image_name}')" onmouseleave="hideOriginalImageOnHover()">
+                                🖼️ Show Original
+                            </button>
                         </div>
                     </div>
                     ${alternativeParts.length > 0 ? `
@@ -1203,21 +1226,56 @@ async function removePartFromList() {
         return;
     }
     
+    const currentIndex = appState.currentReviewIndex;
+    
     // Call backend to remove the part
     const response = await fetch('/remove_part', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            index: appState.currentReviewIndex
+            index: currentIndex
         })
     });
     
     if (response.ok) {
         const data = await response.json();
-        console.log(`Removed part ${appState.currentReviewIndex + 1}, new total: ${data.new_total}`);
+        console.log(`Removed part ${currentIndex + 1}, new total: ${data.new_total}`);
         
-        // Reload the review to update indices and total count
-        await loadReview();
+        // Remove from reviewed parts tracking (adjust indices)
+        const newReviewedParts = new Set();
+        appState.reviewedParts.forEach(idx => {
+            if (idx < currentIndex) {
+                newReviewedParts.add(idx);
+            } else if (idx > currentIndex) {
+                newReviewedParts.add(idx - 1);
+            }
+            // Skip the removed index
+        });
+        appState.reviewedParts = newReviewedParts;
+        
+        // Reload the data from server
+        const reviewResponse = await fetch('/get_results');
+        if (reviewResponse.ok) {
+            const reviewData = await reviewResponse.json();
+            appState.reviewData = reviewData.results;
+            
+            // Stay at same index (which now shows the next part)
+            // But if we're at the end, go to the previous part
+            if (currentIndex >= appState.reviewData.length) {
+                appState.currentReviewIndex = Math.max(0, appState.reviewData.length - 1);
+            } else {
+                appState.currentReviewIndex = currentIndex;
+            }
+            
+            // Display the part at the current/adjusted index
+            if (appState.reviewData.length > 0) {
+                displayReviewPart();
+            } else {
+                // All parts removed
+                const reviewContent = document.getElementById('review-content');
+                reviewContent.innerHTML = '<p>No parts to review.</p>';
+            }
+        }
     } else {
         alert('Error removing part');
     }

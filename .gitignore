@@ -31,3 +31,4 @@ build/
 # Environment variables
 .env
 uploads/
+to_find/
