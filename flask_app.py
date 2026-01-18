@@ -84,6 +84,10 @@ def upload_images():
     if 'pdf_pages' not in sessions[session_id]:
         sessions[session_id]['pdf_pages'] = {}
     
+    # Clear analyzed parts when uploading new images
+    # to prevent mixing old crops with new original images
+    sessions[session_id]['analyzed_parts'] = []
+    
     files = request.files.getlist('images')
     uploaded = []
     
@@ -132,6 +136,10 @@ def upload_pdf():
     # Ensure pdf_pages exists (for older sessions)
     if 'pdf_pages' not in sessions[session_id]:
         sessions[session_id]['pdf_pages'] = {}
+    
+    # Clear analyzed parts when uploading new PDF
+    # to prevent mixing old crops with new original images
+    sessions[session_id]['analyzed_parts'] = []
     
     pdf_file = request.files.get('pdf')
     if not pdf_file:
