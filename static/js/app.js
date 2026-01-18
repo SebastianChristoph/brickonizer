@@ -13,7 +13,9 @@ const appState = {
     reviewedParts: new Set(),  // Track which parts have been reviewed
     pdfData: null,  // Store PDF page data
     oftenParts: [],  // Often unrecognized parts (loaded dynamically)
-    isAutoDetecting: false  // Track auto-detect state
+    isAutoDetecting: false,  // Track auto-detect state
+    recentColors: [],  // Recently used colors (max 3)
+    helpBoxTutorialShown: false  // Track if help box tutorial was shown
 };
 
 // Initialize on page load
@@ -865,8 +867,11 @@ function renderOftenUnrecognizedSidebar(isRecognized) {
     
     return `
         <button class="often-sidebar-toggle" onclick="toggleOftenSidebar()" id="often-toggle-btn">
-            📚 Help
+            📚 Part Helper
         </button>
+        <div id="help-tutorial-hint" style="display: none; position: absolute; right: 0; top: 50px; background: #667eea; color: white; padding: 15px 25px; border-radius: 10px; font-size: 18px; font-weight: 700; white-space: nowrap; box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5); z-index: 999; border: 3px solid #ffffff;">
+            👇 Click here to find common parts
+        </div>
         <div class="often-unrecognized-sidebar ${openClass}" id="often-sidebar">
             <div class="often-sidebar-header">
                 ❓ Often Unrecognized Parts
@@ -886,6 +891,7 @@ function toggleOftenSidebar() {
 }
 
 function useOftenPart(partNumber) {
+    const part = appState.reviewData[appState.currentReviewIndex];
     const partInput = document.getElementById('part-num-input');
     if (partInput) {
         partInput.value = partNumber;
@@ -897,6 +903,67 @@ function useOftenPart(partNumber) {
             partInput.style.background = '';
         }, 1000);
     }
+    
+    // Close the help sidebar
+    const sidebar = document.getElementById('often-sidebar');
+    if (sidebar && sidebar.classList.contains('open')) {
+        sidebar.classList.remove('open');
+    }
+    
+    // Save old App Suggestion part to alternatives before replacing
+    if (part && part.part_id && part.api_image_url) {
+        // Create alternative entry from current part
+        const oldPartAsAlt = {
+            id: part.part_id,
+            name: part.part_name,
+            score: part.confidence || 0,
+            img_url: part.api_image_url
+        };
+        
+        // Initialize raw_api_response if it doesn't exist
+        if (!part.raw_api_response) {
+            part.raw_api_response = { items: [] };
+        }
+        if (!part.raw_api_response.items) {
+            part.raw_api_response.items = [];
+        }
+        
+        // Add old part to alternatives (insert at beginning after current)
+        part.raw_api_response.items.splice(1, 0, oldPartAsAlt);
+    }
+    
+    // Update the App Suggestion image
+    const oftenPart = appState.oftenParts.find(p => p.number === partNumber);
+    if (oftenPart && oftenPart.image) {
+        // Update part data
+        if (part) {
+            part.part_id = partNumber;
+            part.part_name = oftenPart.name || 'Unknown';
+            part.api_image_url = oftenPart.image;
+        }
+        
+        // Find the App Suggestion image in the review card
+        const reviewCard = document.querySelector('.review-card');
+        if (reviewCard) {
+            const appSuggestionImg = reviewCard.querySelector('img[src*="brickognize"]') || 
+                                    reviewCard.querySelectorAll('img')[1]; // Second image is usually app suggestion
+            if (appSuggestionImg) {
+                appSuggestionImg.src = oftenPart.image;
+            }
+        }
+    }
+    
+    // Remove old part info (Recognized Part Number, Name, Confidence)
+    const partDetails = document.querySelector('.part-details');
+    if (partDetails) {
+        const partInfoDiv = partDetails.querySelector('div[style*="font-size: 13px"]');
+        if (partInfoDiv) {
+            partInfoDiv.remove();
+        }
+    }
+    
+    // Refresh the display to show the new alternative
+    displayReviewPart();
 }
 
 function getQuickColorChips() {
@@ -914,12 +981,29 @@ function getQuickColorChips() {
     ];
     
     let chipsHtml = '';
-    quickColors.forEach(colorName => {
-        const color = appState.colors.find(c => c.name === colorName);
-        if (color) {
+    
+    // Add recently used colors first (if any)
+    if (appState.recentColors.length > 0) {
+        appState.recentColors.forEach(color => {
             const hexColor = color.rgb;
             chipsHtml += `
-                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${colorName.replace(/'/g, "\\'")}')"
+                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${color.name.replace(/'/g, "\\'")}')" 
+                     title="${color.name} (Recently used)" style="border: 2px solid #667eea;">
+                    <div class="quick-color-chip-circle" style="background: ${hexColor};"></div>
+                    <span class="quick-color-chip-name">${color.name}</span>
+                </div>
+            `;
+        });
+    }
+    
+    // Add standard quick colors, but skip if already in recent colors
+    const recentColorIds = appState.recentColors.map(c => c.id);
+    quickColors.forEach(colorName => {
+        const color = appState.colors.find(c => c.name === colorName);
+        if (color && !recentColorIds.includes(color.id)) {
+            const hexColor = color.rgb;
+            chipsHtml += `
+                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${colorName.replace(/'/g, "\\'")}')" 
                      title="${colorName}">
                     <div class="quick-color-chip-circle" style="background: ${hexColor};"></div>
                     <span class="quick-color-chip-name">${colorName}</span>
@@ -952,14 +1036,44 @@ function showOriginalImageOnHover(imageName) {
         modal.className = 'original-image-modal';
         modal.innerHTML = `
             <div class="original-image-content" onmouseenter="clearImageModalTimeout()" onmouseleave="hideOriginalImageOnHover()">
-                <img id="original-image-img" src="" alt="Original Image">
+                <canvas id="original-image-canvas" style="max-width: 90vw; max-height: 90vh;"></canvas>
             </div>
         `;
         document.body.appendChild(modal);
     }
     
-    // Set image source and show modal
-    const img = document.getElementById('original-image-img');
+    // Get current part's bounding box
+    const part = appState.reviewData[appState.currentReviewIndex];
+    const bbox = part?.bbox || part?.box;
+    
+    // Load image and draw with box
+    const canvas = document.getElementById('original-image-canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+        // Set canvas size to image size
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        // Draw the image
+        ctx.drawImage(img, 0, 0);
+        
+        // Draw the bounding box if available
+        if (bbox) {
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(bbox.x, bbox.y, bbox.width, bbox.height);
+            
+            // Add a semi-transparent overlay outside the box
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillRect(0, 0, canvas.width, bbox.y); // Top
+            ctx.fillRect(0, bbox.y, bbox.x, bbox.height); // Left
+            ctx.fillRect(bbox.x + bbox.width, bbox.y, canvas.width - (bbox.x + bbox.width), bbox.height); // Right
+            ctx.fillRect(0, bbox.y + bbox.height, canvas.width, canvas.height - (bbox.y + bbox.height)); // Bottom
+        }
+    };
+    
     img.src = `/image/${imageName}`;
     modal.classList.add('active');
 }
@@ -979,6 +1093,88 @@ function hideOriginalImageOnHover() {
             modal.classList.remove('active');
         }
     }, 150);
+}
+
+let colorHelpTimeout = null;
+let colorHelpMouseX = 0;
+let colorHelpMouseY = 0;
+let colorHelpModalOpen = false;
+
+function toggleColorHelp() {
+    const modal = document.getElementById('color-help-modal');
+    if (modal && modal.classList.contains('active')) {
+        hideColorHelp();
+    } else {
+        showColorHelp();
+    }
+}
+
+function showColorHelp() {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('color-help-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'color-help-modal';
+        modal.className = 'original-image-modal';
+        modal.innerHTML = `
+            <div class="original-image-content" onmouseleave="hideColorHelp()" style="max-width: 95vw; max-height: 95vh;">
+                <img src="/static/legocolors.jpg" style="max-width: 100%; max-height: 95vh; display: block;" alt="LEGO Colors Reference">
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        // Close modal when clicking outside
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                hideColorHelp();
+            }
+        });
+    }
+    
+    // Create floating crop image if it doesn't exist
+    let floatingCrop = document.getElementById('floating-crop-image');
+    if (!floatingCrop) {
+        floatingCrop = document.createElement('div');
+        floatingCrop.id = 'floating-crop-image';
+        floatingCrop.style.cssText = 'position: fixed; z-index: 10001; pointer-events: none; background: white; border: 3px solid #667eea; border-radius: 8px; padding: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none;';
+        document.body.appendChild(floatingCrop);
+        
+        // Track mouse movement
+        document.addEventListener('mousemove', (e) => {
+            colorHelpMouseX = e.clientX;
+            colorHelpMouseY = e.clientY;
+            if (floatingCrop.style.display === 'block') {
+                // Position to the right and below cursor
+                floatingCrop.style.left = (e.clientX + 20) + 'px';
+                floatingCrop.style.top = (e.clientY + 20) + 'px';
+            }
+        });
+    }
+    
+    // Get current part's crop image
+    const part = appState.reviewData[appState.currentReviewIndex];
+    if (part && part.crop_image) {
+        floatingCrop.innerHTML = `<img src="data:image/jpeg;base64,${part.crop_image}" style="width: 100px; height: 100px; object-fit: contain; display: block;">`;
+        floatingCrop.style.display = 'block';
+        floatingCrop.style.left = (colorHelpMouseX + 20) + 'px';
+        floatingCrop.style.top = (colorHelpMouseY + 20) + 'px';
+    }
+    
+    modal.classList.add('active');
+    colorHelpModalOpen = true;
+}
+
+function hideColorHelp() {
+    // Hide modal and floating crop
+    const modal = document.getElementById('color-help-modal');
+    const floatingCrop = document.getElementById('floating-crop-image');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    if (floatingCrop) {
+        floatingCrop.style.display = 'none';
+    }
+    colorHelpModalOpen = false;
 }
 
 function incrementQuantity() {
@@ -1012,7 +1208,7 @@ function displayReviewPart() {
     let partInfo = '';
     if (part.recognized) {
         partInfo = `
-            <p><strong>Recognized Part Number:</strong> ${part.part_id || 'N/A'}</p>
+            <p><strong>Recognized Lego Part Number:</strong> ${part.part_id || 'N/A'}</p>
             <p><strong>Name:</strong> ${part.part_name || 'N/A'}</p>
             <p><strong>Confidence:</strong> ${(part.confidence * 100).toFixed(1)}%</p>
         `;
@@ -1094,11 +1290,13 @@ function displayReviewPart() {
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 10px; align-items: end; margin-bottom: 10px;">
                         <div>
-                            <label style="font-size: 12px; display: block; margin-bottom: 3px;">Part Number:</label>
+                            <label style="font-size: 12px; display: block; margin-bottom: 3px;">Lego Part Number:</label>
                             <input type="text" id="part-num-input" value="${part.part_id || ''}" placeholder="e.g. 3001" style="width: 100%; padding: 6px;">
+                            <p style="font-size: 12px; color: #999; margin-top: 4px; font-style: italic; opacity: 0.9;">💡 Only insert Lego part numbers - they'll be auto-mapped to other brands later</p>
                         </div>
                         <div>
                             <label style="font-size: 12px; display: block; margin-bottom: 3px;">Color:</label>
+                            <p id="color-help-trigger" style="font-size: 10px; color: #667eea; margin: 0 0 5px 0; cursor: pointer; text-decoration: underline dotted;" onclick="toggleColorHelp()">❓ Need color help?</p>
                             <div class="custom-color-dropdown">
                                 <div class="color-dropdown-header" id="color-dropdown-header" onclick="toggleColorDropdown()">
                                     <div class="selected-color">
@@ -1125,7 +1323,7 @@ function displayReviewPart() {
                             <div id="quantity-info" style="font-size: 10px; color: #6c757d; display: none; font-style: italic; margin-bottom: 5px;">
                                 ℹ️ Quantity read from image (may contain errors)
                             </div>
-                            <button class="btn btn-secondary" style="width: 100%; padding: 6px 12px; font-size: 12px;" onmouseenter="showOriginalImageOnHover('${part.image_name}')" onmouseleave="hideOriginalImageOnHover()">
+                            <button class="btn btn-secondary" style="width: 100%; padding: 6px 12px; font-size: 12px;" onmouseenter="showOriginalImageOnHover('${part.image_name}')" onmouseleave="hideOriginalImageOnHover()" title="Hover to see the part location in the original image">
                                 🖼️ Show Original
                             </button>
                         </div>
@@ -1169,6 +1367,70 @@ function displayReviewPart() {
         
         // Auto-detect quantity
         autoDetectQuantity();
+        
+        // Show help box tutorial on first part
+        if (appState.currentReviewIndex === 0 && !appState.helpBoxTutorialShown) {
+            appState.helpBoxTutorialShown = true;
+            setTimeout(() => {
+                const sidebar = document.getElementById('often-sidebar');
+                const tutorialHint = document.getElementById('help-tutorial-hint');
+                
+                if (sidebar && tutorialHint) {
+                    // Open sidebar
+                    sidebar.classList.add('open');
+                    // Show tutorial hint
+                    tutorialHint.style.display = 'block';
+                    
+                    // Auto-close after 3 seconds
+                    setTimeout(() => {
+                        sidebar.classList.remove('open');
+                        // Fade out hint
+                        tutorialHint.style.transition = 'opacity 0.5s';
+                        tutorialHint.style.opacity = '0';
+                        setTimeout(() => {
+                            tutorialHint.style.display = 'none';
+                            tutorialHint.style.opacity = '1';
+                        }, 500);
+                    }, 3000);
+                }
+            }, 200);
+        }
+        
+        // Add event listener to part number input for manual changes
+        const partNumInput = document.getElementById('part-num-input');
+        if (partNumInput) {
+            let debounceTimer;
+            const originalPartId = part.part_id || '';
+            
+            partNumInput.addEventListener('input', (e) => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    const newValue = e.target.value.trim();
+                    // If user changed the part number manually
+                    if (newValue !== originalPartId && newValue !== '') {
+                        // Hide/remove App Suggestion image and label
+                        const reviewCard = document.querySelector('.review-card');
+                        if (reviewCard) {
+                            const appSuggestionContainer = Array.from(reviewCard.querySelectorAll('div[style*="width: 120px"]')).find(div => 
+                                div.textContent.includes('App Suggestion')
+                            );
+                            if (appSuggestionContainer) {
+                                appSuggestionContainer.style.display = 'none';
+                            }
+                        }
+                        
+                        // Remove part info (Recognized Part Number, Name, Confidence)
+                        const partDetails = document.querySelector('.part-details');
+                        if (partDetails) {
+                            const partInfoDiv = partDetails.querySelector('div[style*="font-size: 13px"]');
+                            if (partInfoDiv) {
+                                partInfoDiv.remove();
+                            }
+                        }
+                    }
+                }, 500); // 500ms debounce
+            });
+        }
     }, 100);
 }
 
@@ -1186,6 +1448,19 @@ async function savePart() {
     if (!colorId) {
         alert('Please select color!');
         return;
+    }
+    
+    // Add color to recent colors (max 3, remove duplicates)
+    const selectedColor = appState.colors.find(c => c.id === colorId || c.name === colorId);
+    if (selectedColor) {
+        // Remove if already in list
+        appState.recentColors = appState.recentColors.filter(c => c.id !== selectedColor.id);
+        // Add to front
+        appState.recentColors.unshift(selectedColor);
+        // Keep only last 3
+        if (appState.recentColors.length > 3) {
+            appState.recentColors = appState.recentColors.slice(0, 3);
+        }
     }
     
     // Mark as reviewed
@@ -1774,6 +2049,9 @@ window.selectQuickColor = selectQuickColor;
 window.showOriginalImageOnHover = showOriginalImageOnHover;
 window.hideOriginalImageOnHover = hideOriginalImageOnHover;
 window.clearImageModalTimeout = clearImageModalTimeout;
+window.toggleColorHelp = toggleColorHelp;
+window.showColorHelp = showColorHelp;
+window.hideColorHelp = hideColorHelp;
 window.toggleOftenSidebar = toggleOftenSidebar;
 window.useOftenPart = useOftenPart;
 window.incrementQuantity = incrementQuantity;
