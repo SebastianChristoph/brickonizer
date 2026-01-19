@@ -848,9 +848,16 @@ async function loadOftenParts() {
     }
 }
 
-function renderOftenUnrecognizedSidebar(isRecognized) {
+function renderOftenUnrecognizedSidebar(isRecognized, keepCurrentState = false) {
     // Bei unrecognized automatisch geöffnet, bei recognized geschlossen
-    const openClass = !isRecognized ? 'open' : '';
+    // Wenn keepCurrentState=true, behalten wir den aktuellen Status
+    let openClass = '';
+    if (keepCurrentState) {
+        const currentSidebar = document.getElementById('often-sidebar');
+        openClass = currentSidebar && currentSidebar.classList.contains('open') ? 'open' : '';
+    } else {
+        openClass = !isRecognized ? 'open' : '';
+    }
     
     let partsHtml = '';
     appState.oftenParts.forEach(part => {
@@ -904,11 +911,8 @@ function useOftenPart(partNumber) {
         }, 1000);
     }
     
-    // Close the help sidebar
-    const sidebar = document.getElementById('often-sidebar');
-    if (sidebar && sidebar.classList.contains('open')) {
-        sidebar.classList.remove('open');
-    }
+    // Mark that we want to close the sidebar after refresh
+    appState.closeSidebarAfterRefresh = true;
     
     // Save old App Suggestion part to alternatives before replacing
     if (part && part.part_id && part.api_image_url) {
@@ -964,6 +968,15 @@ function useOftenPart(partNumber) {
     
     // Refresh the display to show the new alternative
     displayReviewPart();
+    
+    // Now close the sidebar after refresh
+    if (appState.closeSidebarAfterRefresh) {
+        const sidebar = document.getElementById('often-sidebar');
+        if (sidebar) {
+            sidebar.classList.remove('open');
+        }
+        appState.closeSidebarAfterRefresh = false;
+    }
 }
 
 function getQuickColorChips() {
@@ -1185,12 +1198,17 @@ function incrementQuantity() {
     }
 }
 
-function displayReviewPart() {
+function displayReviewPart(keepSidebarState = false) {
     const reviewContent = document.getElementById('review-content');
     
     if (appState.reviewData.length === 0) {
         reviewContent.innerHTML = '<p>No parts to review.</p>';
         return;
+    }
+    
+    // Wenn wir aus useOftenPart kommen, Sidebar-Status beibehalten
+    if (appState.closeSidebarAfterRefresh) {
+        keepSidebarState = true;
     }
     
     const part = appState.reviewData[appState.currentReviewIndex];
@@ -1256,7 +1274,7 @@ function displayReviewPart() {
     
     reviewContent.innerHTML = `
         <div class="review-wizard">
-            ${renderOftenUnrecognizedSidebar(part.recognized)}
+            ${renderOftenUnrecognizedSidebar(part.recognized, keepSidebarState)}
             <div class="review-progress" style="margin-bottom: 15px; position: relative;">
                 <h3 style="margin-bottom: 5px;">Part ${partNum} of ${total}</h3>
                 <div class="progress-bar">
@@ -1426,6 +1444,12 @@ function displayReviewPart() {
                             if (partInfoDiv) {
                                 partInfoDiv.remove();
                             }
+                        }
+                        
+                        // Remove the "unrecognized" tip box if present
+                        const tipBox = document.querySelector('div[style*="background: #e7f3ff"]');
+                        if (tipBox) {
+                            tipBox.remove();
                         }
                     }
                 }, 500); // 500ms debounce
@@ -1809,67 +1833,49 @@ async function loadExport() {
             
             // Copy button now uses global function defined at top of file via HTML onclick attribute
             
-            // Get unrecognized parts - check which parts were actually exported
-            const exportedPartNums = new Set(data.parts.map(p => p.partNum));
-            
-            const resultsResponse = await fetch('/get_results');
-            if (resultsResponse.ok) {
-                const resultsData = await resultsResponse.json();
-                
-                // Only show parts that:
-                // 1. Were not exported (not in exportedPartNums)
-                // 2. Are counted in unrecognizedCount or skippedCount
-                const totalProcessed = data.recognizedParts;
-                const totalParts = data.totalParts;
-                const shouldShowUnrecognized = data.unrecognizedCount > 0 || data.skippedCount > 0;
-                
-                if (shouldShowUnrecognized) {
-                    // Find parts that weren't exported
-                    const unrecognized = resultsData.results.filter((r, idx) => {
-                        // Check if this part was exported
-                        const wasExported = data.parts.some(p => {
-                            // Match by index would be ideal, but we can check if it exists in export
-                            return true; // We'll filter by what's NOT in the export
-                        });
-                        
-                        // Part is unrecognized if it's not in the recognized parts list
-                        return idx >= totalProcessed || (!r.recognized && !exportedPartNums.has(r.part_id));
-                    });
+            // Show unrecognized parts if there are any
+            if (data.unrecognizedParts && data.unrecognizedParts.length > 0) {
+                // Fetch the full part data to display images
+                const resultsResponse = await fetch('/get_results');
+                if (resultsResponse.ok) {
+                    const resultsData = await resultsResponse.json();
                     
-                    if (unrecognized.length > 0) {
-                        let unrecognizedHTML = `
-                            <div class="unrecognized-section">
-                                <h3>⚠️ Unrecognized Parts</h3>
-                                <p>These ${unrecognized.length} part(s) were not exported (skipped or unknown):</p>
-                                <div class="unrecognized-grid">
-                        `;
-                        
-                        unrecognized.forEach((part, idx) => {
+                    let unrecognizedHTML = `
+                        <div class="unrecognized-section">
+                            <h3>⚠️ Unrecognized Parts</h3>
+                            <p>These ${data.unrecognizedParts.length} part(s) were not exported (skipped or unknown):</p>
+                            <div class="unrecognized-grid">
+                    `;
+                    
+                    // Display each unrecognized part using the index from backend
+                    data.unrecognizedParts.forEach(unrecPart => {
+                        const fullPart = resultsData.results[unrecPart.index];
+                        if (fullPart) {
                             unrecognizedHTML += `
                                 <div class="unrecognized-part">
-                                    <img src="data:image/jpeg;base64,${part.crop_image}" alt="Part ${idx + 1}">
-                                    <p>Part ${part.index + 1} from ${part.image_name}</p>
+                                    <img src="data:image/jpeg;base64,${fullPart.crop_image}" alt="Part ${unrecPart.index + 1}">
+                                    <p>Part ${unrecPart.index + 1} from ${unrecPart.image_name}</p>
                                 </div>
                             `;
-                        });
-                        
-                        unrecognizedHTML += `
-                                </div>
+                        }
+                    });
+                    
+                    unrecognizedHTML += `
                             </div>
-                        `;
-                        
-                        exportContent.innerHTML += unrecognizedHTML;
-                    }
-                } else if (data.recognizedParts === data.totalParts) {
-                    // All parts were successfully processed
-                    let successHTML = `
-                        <div class="success-section" style="margin-top: 20px; padding: 20px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px; color: #155724;">
-                            <h3>✅ All Parts Successfully Processed!</h3>
-                            <p>All ${data.totalParts} parts have been recognized and exported.</p>
                         </div>
                     `;
-                    exportContent.innerHTML += successHTML;
+                    
+                    exportContent.innerHTML += unrecognizedHTML;
                 }
+            } else if (data.recognizedParts === data.totalParts) {
+                // All parts were successfully processed
+                let successHTML = `
+                    <div class="success-section" style="margin-top: 20px; padding: 20px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px; color: #155724;">
+                        <h3>✅ All Parts Successfully Processed!</h3>
+                        <p>All ${data.totalParts} parts have been recognized and exported.</p>
+                    </div>
+                `;
+                exportContent.innerHTML += successHTML;
             }
         }
     } catch (error) {

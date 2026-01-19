@@ -962,16 +962,30 @@ def export_json():
     parts = sessions[session_id].get('analyzed_parts', [])
     
     valid_parts = []
+    unrecognized_parts = []  # Track unrecognized parts with their indices
     skipped_count = 0
     unknown_count = 0
     
-    for part in parts:
+    for idx, part in enumerate(parts):
         if hasattr(part, 'user_data'):
+            # Only count as unknown if explicitly marked as unknown or no_match
+            # If user provided a part_num, it should be considered recognized
             if part.user_data.get('unknown') or part.user_data.get('no_match'):
                 unknown_count += 1
+                unrecognized_parts.append({
+                    'index': idx,
+                    'image_name': part.image_name,
+                    'reason': 'unknown' if part.user_data.get('unknown') else 'no_match'
+                })
             elif part.user_data.get('skip'):
                 skipped_count += 1
+                unrecognized_parts.append({
+                    'index': idx,
+                    'image_name': part.image_name,
+                    'reason': 'skip'
+                })
             elif part.user_data.get('part_num'):
+                # User provided part number - treat as recognized
                 # Get color ID - convert name to ID if needed
                 color_value = part.user_data.get('color_id')
                 color_id = None
@@ -1016,6 +1030,7 @@ def export_json():
         'recognizedParts': len(valid_parts),
         'unrecognizedCount': unknown_count,
         'skippedCount': skipped_count,
+        'unrecognizedParts': unrecognized_parts,  # Add this so frontend knows which parts are unrecognized
         'parts': valid_parts
     }
     

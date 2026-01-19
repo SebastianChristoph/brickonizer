@@ -154,8 +154,8 @@
             <div id="export-content">
                 <div class="export-buttons">
                     <button id="export-btn" class="btn btn-primary" onclick="downloadJson()">💾 Download JSON</button>
-                    <button id="export-bricklink-btn" class="btn btn-success" onclick="downloadBrickLinkXml()">🧱 Export as BrickLink XML</button>
-                    <button id="copy-json-btn" class="btn btn-secondary" onclick="copyJsonToClipboard()">📋 Copy to Clipboard</button>
+                    <button id="export-bricklink-btn" class="btn btn-success" onclick="downloadBrickLinkXml()" title="⚠️ Note: This export only includes parts that were saved. Unrecognized, skipped, or 'Don't know' parts are NOT included.">🧱 Export as BrickLink XML</button>
+                    <button id="copy-json-btn" class="btn btn-secondary" onclick="copyJsonToClipboard()">📋 Copy to Clipboard for brickisbrick.com</button>
                 </div>
                 <h3 style="margin-top: 20px;">JSON Preview</h3>
                 <pre id="json-preview"></pre>
