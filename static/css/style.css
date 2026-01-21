@@ -900,3 +900,60 @@ h2 {
 .mt-20 {
     margin-top: 20px;
 }
+
+/* Bluebrixx Import Styling */
+#bluebrixx-tab input[type="text"],
+#bluebrixx-tab textarea {
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+#bluebrixx-tab input[type="text"]:focus,
+#bluebrixx-tab textarea:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+#bluebrixx-tab .btn {
+    transition: all 0.3s ease;
+}
+
+#bluebrixx-tab .btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+#bluebrixx-tab .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#bluebrixx-parts-preview table {
+    border: 1px solid #dee2e6;
+}
+
+#bluebrixx-parts-preview th {
+    position: sticky;
+    top: 0;
+    background: #f5f5f5;
+    z-index: 10;
+}
+
+#bluebrixx-parts-preview::-webkit-scrollbar {
+    width: 8px;
+}
+
+#bluebrixx-parts-preview::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+#bluebrixx-parts-preview::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+#bluebrixx-parts-preview::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
