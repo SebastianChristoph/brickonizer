@@ -70,6 +70,51 @@ class BluebrixxService:
     """Service to fetch and process Bluebrixx spare parts"""
     
     @staticmethod
+    def parse_pasted_text(pasted_text: str) -> List[Dict]:
+        """
+        Parse pasted text from Bluebrixx spare parts page (3 lines pro Datensatz).
+        Zeile 1: ItemNr\tFormNo
+        Zeile 2: Color\tDescription
+        Zeile 3: Category\tQuantity
+        """
+        import re
+        parts = []
+        lines = [l.strip() for l in pasted_text.strip().split('\n') if l.strip()]
+        i = 0
+        while i + 2 < len(lines):
+            # Zeile 1: ItemNr und FormNr
+            tokens1 = re.split(r'\t+', lines[i])
+            tokens1 = [t.strip() for t in tokens1 if t.strip()]
+            item_nr = None
+            form_nr = None
+            if len(tokens1) >= 2:
+                item_nr = tokens1[0]
+                form_nr = tokens1[1]
+            # Zeile 2: Color
+            tokens2 = re.split(r'\t+', lines[i+1])
+            color_name = tokens2[0].strip() if tokens2 else ''
+            # Zeile 3: Quantity
+            tokens3 = re.split(r'\t+', lines[i+2])
+            qty = 0
+            for token in reversed(tokens3):
+                qty_clean = ''.join(c for c in token if c.isdigit())
+                if qty_clean:
+                    try:
+                        qty = int(qty_clean)
+                        break
+                    except ValueError:
+                        pass
+            if item_nr and form_nr and color_name and qty > 0:
+                parts.append({
+                    "form_nr": form_nr,
+                    "article_nr": item_nr,
+                    "color": color_name,
+                    "qty": qty,
+                })
+            i += 3
+        return parts
+    
+    @staticmethod
     def fetch_spareparts_html(set_itemno: str, order_no: str, cookie_header: str = None) -> str:
         """
         Fetch the HTML response from ajax_add_sparParts.php.
@@ -193,6 +238,35 @@ class BluebrixxService:
         # Return nicely formatted XML
         xml_str = ET.tostring(root, encoding="unicode")
         return xml_str
+
+    @staticmethod
+    def get_partlist_from_text(pasted_text: str) -> Dict:
+        """
+        Parse pasted text from Bluebrixx and convert to BrickLink XML
+        No HTTP request needed - user copies the table directly
+        """
+        try:
+            parts = BluebrixxService.parse_pasted_text(pasted_text)
+            
+            if not parts:
+                return {
+                    'success': False,
+                    'error': 'No valid parts found in pasted text. Make sure you copied the entire parts table from Bluebrixx.'
+                }
+            
+            xml_str = BluebrixxService.parts_to_bricklink_xml(parts)
+            
+            return {
+                'success': True,
+                'parts': parts,
+                'xml': xml_str,
+                'part_count': len(parts)
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Parse error: {str(e)}'
+            }
 
     @staticmethod
     def get_partlist(set_itemno: str, order_no: str, cookie_header: str = None) -> Dict:

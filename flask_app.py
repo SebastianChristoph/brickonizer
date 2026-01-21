@@ -1179,6 +1179,52 @@ def reset_session():
     return jsonify({'success': True, 'session_id': new_session_id})
 
 
+@app.route('/bluebrixx_parse', methods=['POST'])
+def bluebrixx_parse():
+    """Parse pasted text from Bluebrixx spare parts page"""
+    try:
+        data = request.get_json()
+        pasted_text = data.get('pasted_text', '').strip()
+        
+        if not pasted_text:
+            return jsonify({
+                'success': False,
+                'error': 'No text provided. Please paste the Bluebrixx part list.'
+            }), 400
+        
+        # Parse the text directly - no HTTP request needed!
+        result = BluebrixxService.get_partlist_from_text(pasted_text)
+        
+        if result['success']:
+            # Store in session for download
+            session_id = session.get('session_id')
+            if not session_id:
+                session_id = str(uuid.uuid4())
+                session['session_id'] = session_id
+                sessions[session_id] = {
+                    'images': {},
+                    'current_image': None,
+                    'analyzed_parts': [],
+                    'created_at': datetime.now().isoformat()
+                }
+            
+            sessions[session_id]['bluebrixx_xml'] = result['xml']
+            sessions[session_id]['bluebrixx_parts'] = result['parts']
+            
+            return jsonify({
+                'success': True,
+                'part_count': result['part_count'],
+                'parts': result['parts']
+            })
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}'
+        }), 500
+
 @app.route('/bluebrixx_fetch', methods=['POST'])
 def bluebrixx_fetch():
     """Fetch partlist from Bluebrixx order"""
@@ -1241,7 +1287,6 @@ def bluebrixx_download_xml():
         return jsonify({'error': 'No session found'}), 404
     
     xml_content = sessions[session_id].get('bluebrixx_xml')
-    set_itemno = sessions[session_id].get('bluebrixx_set_itemno', 'unknown')
     
     if not xml_content:
         return jsonify({'error': 'No Bluebrixx data available'}), 404
@@ -1249,7 +1294,7 @@ def bluebrixx_download_xml():
     from flask import make_response
     response = make_response(xml_content)
     response.headers['Content-Type'] = 'application/xml'
-    response.headers['Content-Disposition'] = f'attachment; filename=bluebrixx_{set_itemno}_partlist.xml'
+    response.headers['Content-Disposition'] = f'attachment; filename=bluebrixx_partlist.xml'
     
     return response
 
