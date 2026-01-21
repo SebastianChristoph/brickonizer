@@ -12,6 +12,8 @@ pytesseract==0.3.10
 
 # HTTP Client
 httpx==0.26.0
+requests==2.31.0
+beautifulsoup4==4.12.3
 
 # Data Handling
 pandas==2.2.0

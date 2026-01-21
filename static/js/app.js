@@ -2180,3 +2180,157 @@ async function cancelAnalysis() {
 }
 
 window.cancelAnalysis = cancelAnalysis;
+
+// ===== BLUEBRIXX INTEGRATION =====
+
+// Store current Bluebrixx data for later use
+let currentBluebrixxData = {
+    set_itemno: null,
+    order_no: null
+};
+
+function openBluebrixxModal() {
+    document.getElementById('bluebrixx-modal').style.display = 'block';
+    // Reset form
+    document.getElementById('bluebrixx-set-item').value = '';
+    document.getElementById('bluebrixx-order-no').value = '';
+    document.getElementById('bluebrixx-spinner').style.display = 'none';
+    document.getElementById('bluebrixx-status').innerHTML = '';
+    document.getElementById('bluebrixx-result').style.display = 'none';
+}
+
+function closeBluebrixxModal() {
+    document.getElementById('bluebrixx-modal').style.display = 'none';
+}
+
+async function fetchBluebrixxPartlist() {
+    const setItem = document.getElementById('bluebrixx-set-item').value.trim();
+    const orderNo = document.getElementById('bluebrixx-order-no').value.trim();
+    
+    // Validation
+    if (!setItem || !orderNo) {
+        alert('Please fill in both Set Item Number and Order Number');
+        return;
+    }
+    
+    // Show spinner, hide previous results
+    const spinner = document.getElementById('bluebrixx-spinner');
+    const statusDiv = document.getElementById('bluebrixx-status');
+    const resultDiv = document.getElementById('bluebrixx-result');
+    const fetchBtn = document.getElementById('bluebrixx-fetch-btn');
+    
+    spinner.style.display = 'block';
+    statusDiv.innerHTML = '';
+    resultDiv.style.display = 'none';
+    fetchBtn.disabled = true;
+    
+    try {
+        const response = await fetch('/bluebrixx_fetch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                set_itemno: setItem,
+                order_no: orderNo
+            })
+        });
+        
+        const data = await response.json();
+        
+        // Hide spinner
+        spinner.style.display = 'none';
+        fetchBtn.disabled = false;
+        
+        if (response.ok && data.success) {
+            // Store data for inspect button
+            currentBluebrixxData.set_itemno = data.set_itemno || setItem;
+            currentBluebrixxData.order_no = data.order_no || orderNo;
+            
+            // Show success
+            document.getElementById('bluebrixx-part-count').textContent = 
+                `Found ${data.part_count} parts in the list`;
+            
+            // Show parts preview
+            const previewDiv = document.getElementById('bluebrixx-parts-preview');
+            let previewHtml = '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+            previewHtml += '<thead><tr style="background: #f5f5f5; font-weight: 600; text-align: left;">';
+            previewHtml += '<th style="padding: 6px; border-bottom: 2px solid #ddd;">Part Number</th>';
+            previewHtml += '<th style="padding: 6px; border-bottom: 2px solid #ddd;">Article</th>';
+            previewHtml += '<th style="padding: 6px; border-bottom: 2px solid #ddd;">Color</th>';
+            previewHtml += '<th style="padding: 6px; border-bottom: 2px solid #ddd;">Qty</th>';
+            previewHtml += '</tr></thead><tbody>';
+            
+            data.parts.forEach((part, idx) => {
+                const bgColor = idx % 2 === 0 ? '#fff' : '#f9f9f9';
+                previewHtml += `<tr style="background: ${bgColor};">`;
+                previewHtml += `<td style="padding: 6px; border-bottom: 1px solid #eee;">${part.form_nr}</td>`;
+                previewHtml += `<td style="padding: 6px; border-bottom: 1px solid #eee;">${part.article_nr}</td>`;
+                previewHtml += `<td style="padding: 6px; border-bottom: 1px solid #eee;">${part.color}</td>`;
+                previewHtml += `<td style="padding: 6px; border-bottom: 1px solid #eee;">${part.qty}</td>`;
+                previewHtml += '</tr>';
+            });
+            
+            previewHtml += '</tbody></table>';
+            previewDiv.innerHTML = previewHtml;
+            
+            // Show result section
+            resultDiv.style.display = 'block';
+            
+        } else {
+            // Show error
+            statusDiv.innerHTML = `
+                <div style="background: #f8d7da; border: 2px solid #f5c6cb; border-radius: 8px; padding: 15px;">
+                    <div style="font-size: 28px; margin-bottom: 8px;">❌</div>
+                    <h3 style="margin: 0 0 8px 0; color: #721c24; font-size: 16px;">Error Fetching Part List</h3>
+                    <p style="margin: 0; color: #721c24; font-size: 13px;">${data.error || 'Unknown error occurred'}</p>
+                    <details style="margin-top: 10px;">
+                        <summary style="cursor: pointer; color: #721c24; font-weight: 600; font-size: 12px;">Troubleshooting Tips</summary>
+                        <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #721c24; text-align: left; line-height: 1.6; font-size: 12px;">
+                            <li>Check that the Set Item Number and Order Number are correct</li>
+                            <li>Verify the order contains the specified set</li>
+                            <li>Make sure you're using a recent Bluebrixx order</li>
+                            <li>Try again in a few moments if the service is temporarily unavailable</li>
+                        </ul>
+                    </details>
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        console.error('Bluebrixx fetch error:', error);
+        spinner.style.display = 'none';
+        fetchBtn.disabled = false;
+        
+        statusDiv.innerHTML = `
+            <div style="background: #f8d7da; border: 2px solid #f5c6cb; border-radius: 8px; padding: 15px; text-align: center;">
+                <div style="font-size: 28px; margin-bottom: 8px;">❌</div>
+                <h3 style="margin: 0 0 8px 0; color: #721c24; font-size: 16px;">Network Error</h3>
+                <p style="margin: 0; color: #721c24; font-size: 13px;">Could not connect to the server. Please try again.</p>
+            </div>
+        `;
+    }
+}
+
+function downloadBluebrixxXml() {
+    console.log('[BLUEBRIXX] Downloading XML');
+    window.location.href = '/bluebrixx_download_xml';
+}
+
+function inspectBluebrixxPartlist() {
+    if (!currentBluebrixxData.set_itemno || !currentBluebrixxData.order_no) {
+        alert('No Bluebrixx data available');
+        return;
+    }
+    
+    const url = `https://service.bluebrixx.com/de/contact_spareparts?ccs_item=${currentBluebrixxData.set_itemno}&ccs_order=${currentBluebrixxData.order_no}`;
+    console.log('[BLUEBRIXX] Opening inspect URL:', url);
+    window.open(url, '_blank');
+}
+
+// Make functions globally accessible
+window.openBluebrixxModal = openBluebrixxModal;
+window.closeBluebrixxModal = closeBluebrixxModal;
+window.fetchBluebrixxPartlist = fetchBluebrixxPartlist;
+window.downloadBluebrixxXml = downloadBluebrixxXml;
+window.inspectBluebrixxPartlist = inspectBluebrixxPartlist;

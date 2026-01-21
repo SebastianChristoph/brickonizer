@@ -18,6 +18,7 @@ import pytesseract
 
 from models import BoundingBox, ProcessedPart, ImageSession
 from services import ImageProcessor, get_api_instance
+from services.bluebrixx_service import BluebrixxService
 from utils.bricklink_colors import BricklinkColorMap
 
 # Configure Tesseract path for Windows
@@ -99,7 +100,12 @@ def upload_images():
             
             # Load image
             image = Image.open(filepath)
-            image_np = np.array(image)
+            # Convert to RGB if needed
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            # Convert to numpy array and then to BGR (OpenCV format)
+            image_rgb = np.array(image)
+            image_np = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
             
             # Store in session
             sessions[session_id]['images'][filename] = {
@@ -228,8 +234,11 @@ def convert_pdf_pages():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{session_id}_{filename}")
             image.save(filepath)
             
-            # Store in session
-            image_np = np.array(image)
+            # Store in session - convert to BGR (OpenCV format)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image_rgb = np.array(image)
+            image_np = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
             sessions[session_id]['images'][filename] = {
                 'filepath': filepath,
                 'image_np': image_np,
@@ -1168,6 +1177,80 @@ def reset_session():
     }
     
     return jsonify({'success': True, 'session_id': new_session_id})
+
+
+@app.route('/bluebrixx_fetch', methods=['POST'])
+def bluebrixx_fetch():
+    """Fetch partlist from Bluebrixx order"""
+    try:
+        data = request.get_json()
+        set_itemno = data.get('set_itemno', '').strip()
+        order_no = data.get('order_no', '').strip()
+        
+        if not set_itemno or not order_no:
+            return jsonify({
+                'success': False,
+                'error': 'Both Set Item No and Order No are required'
+            }), 400
+        
+        # Fetch partlist using Bluebrixx service with default cookie
+        result = BluebrixxService.get_partlist(set_itemno, order_no)
+        
+        if result['success']:
+            # Store in session for download
+            session_id = session.get('session_id')
+            if not session_id:
+                session_id = str(uuid.uuid4())
+                session['session_id'] = session_id
+                sessions[session_id] = {
+                    'images': {},
+                    'current_image': None,
+                    'analyzed_parts': [],
+                    'created_at': datetime.now().isoformat()
+                }
+            
+            sessions[session_id]['bluebrixx_xml'] = result['xml']
+            sessions[session_id]['bluebrixx_parts'] = result['parts']
+            sessions[session_id]['bluebrixx_set_itemno'] = set_itemno
+            sessions[session_id]['bluebrixx_order_no'] = order_no
+            
+            return jsonify({
+                'success': True,
+                'part_count': result['part_count'],
+                'parts': result['parts'],
+                'set_itemno': set_itemno,
+                'order_no': order_no
+            })
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}'
+        }), 500
+
+
+@app.route('/bluebrixx_download_xml')
+def bluebrixx_download_xml():
+    """Download BrickLink XML from Bluebrixx partlist"""
+    session_id = session.get('session_id')
+    
+    if not session_id or session_id not in sessions:
+        return jsonify({'error': 'No session found'}), 404
+    
+    xml_content = sessions[session_id].get('bluebrixx_xml')
+    set_itemno = sessions[session_id].get('bluebrixx_set_itemno', 'unknown')
+    
+    if not xml_content:
+        return jsonify({'error': 'No Bluebrixx data available'}), 404
+    
+    from flask import make_response
+    response = make_response(xml_content)
+    response.headers['Content-Type'] = 'application/xml'
+    response.headers['Content-Disposition'] = f'attachment; filename=bluebrixx_{set_itemno}_partlist.xml'
+    
+    return response
 
 
 if __name__ == "__main__":
