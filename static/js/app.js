@@ -2206,6 +2206,7 @@ function closeBluebrixxModal() {
 async function fetchBluebrixxPartlist() {
     const setItem = document.getElementById('bluebrixx-set-item').value.trim();
     const orderNo = document.getElementById('bluebrixx-order-no').value.trim();
+    const cookieInput = document.getElementById('bluebrixx-cookie').value.trim();
     
     // Validation
     if (!setItem || !orderNo) {
@@ -2225,15 +2226,22 @@ async function fetchBluebrixxPartlist() {
     fetchBtn.disabled = true;
     
     try {
+        const requestBody = {
+            set_itemno: setItem,
+            order_no: orderNo
+        };
+        
+        // Add cookie if provided
+        if (cookieInput) {
+            requestBody.cookie = cookieInput;
+        }
+        
         const response = await fetch('/bluebrixx_fetch', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                set_itemno: setItem,
-                order_no: orderNo
-            })
+            body: JSON.stringify(requestBody)
         });
         
         const data = await response.json();
@@ -2278,17 +2286,29 @@ async function fetchBluebrixxPartlist() {
             resultDiv.style.display = 'block';
             
         } else {
+            // Check if it's a 403 error (likely cookie issue)
+            const is403Error = data.error && data.error.includes('403');
+            
             // Show error
             statusDiv.innerHTML = `
                 <div style="background: #f8d7da; border: 2px solid #f5c6cb; border-radius: 8px; padding: 15px;">
                     <div style="font-size: 28px; margin-bottom: 8px;">❌</div>
                     <h3 style="margin: 0 0 8px 0; color: #721c24; font-size: 16px;">Error Fetching Part List</h3>
                     <p style="margin: 0; color: #721c24; font-size: 13px;">${data.error || 'Unknown error occurred'}</p>
+                    ${is403Error ? `
+                        <div style="margin-top: 12px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+                            <strong style="color: #856404; font-size: 13px;">💡 Server Deployment Detected:</strong>
+                            <p style="margin: 5px 0 0 0; color: #856404; font-size: 12px;">
+                                The default cookie doesn't work on your server. Please provide your own browser cookie in the "Advanced" section above.
+                            </p>
+                        </div>
+                    ` : ''}
                     <details style="margin-top: 10px;">
                         <summary style="cursor: pointer; color: #721c24; font-weight: 600; font-size: 12px;">Troubleshooting Tips</summary>
                         <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #721c24; text-align: left; line-height: 1.6; font-size: 12px;">
                             <li>Check that the Set Item Number and Order Number are correct</li>
                             <li>Verify the order contains the specified set</li>
+                            ${is403Error ? '<li><strong>If running on a server:</strong> Provide your browser cookie (expand "Advanced" section above)</li>' : ''}
                             <li>Make sure you're using a recent Bluebrixx order</li>
                             <li>Try again in a few moments if the service is temporarily unavailable</li>
                         </ul>

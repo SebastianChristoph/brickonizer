@@ -1186,6 +1186,7 @@ def bluebrixx_fetch():
         data = request.get_json()
         set_itemno = data.get('set_itemno', '').strip()
         order_no = data.get('order_no', '').strip()
+        cookie = data.get('cookie', '').strip()  # Optional custom cookie
         
         if not set_itemno or not order_no:
             return jsonify({
@@ -1193,8 +1194,8 @@ def bluebrixx_fetch():
                 'error': 'Both Set Item No and Order No are required'
             }), 400
         
-        # Fetch partlist using Bluebrixx service with default cookie
-        result = BluebrixxService.get_partlist(set_itemno, order_no)
+        # Fetch partlist using Bluebrixx service with optional custom cookie
+        result = BluebrixxService.get_partlist(set_itemno, order_no, cookie if cookie else None)
         
         if result['success']:
             # Store in session for download
