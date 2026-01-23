@@ -2241,8 +2241,11 @@ async function fetchBluebrixxPartlist() {
         
         if (response.ok && data.success) {
             // Show success
+            // Calculate total quantity
+            const totalQuantity = data.parts.reduce((sum, part) => sum + parseInt(part.qty || 0), 0);
+            
             document.getElementById('bluebrixx-part-count').textContent = 
-                `Found ${data.part_count} parts in the list`;
+                `Found ${data.part_count} different parts with ${totalQuantity} total pieces`;
             
             // Show parts preview
             const previewDiv = document.getElementById('bluebrixx-parts-preview');
