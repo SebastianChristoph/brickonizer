@@ -18,6 +18,7 @@ class CanvasDrawer {
         this.startY = 0;
         this.currentFilename = null;
         this.hoveredBoxIndex = -1;  // Track which box is being hovered
+        this.imageScale = 1;  // Track image scaling factor
         
         this.setupEventListeners();
     }
@@ -65,7 +66,7 @@ class CanvasDrawer {
             this.image = new Image();
             
             this.image.onload = () => {
-                // Set canvas size to image size
+                // Set canvas size to image size (image is already scaled server-side)
                 this.canvas.width = this.image.width;
                 this.canvas.height = this.image.height;
                 

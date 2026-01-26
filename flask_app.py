@@ -92,6 +92,10 @@ def upload_images():
     files = request.files.getlist('images')
     uploaded = []
     
+    # Maximum dimensions for uploaded images
+    MAX_WIDTH = 1920
+    MAX_HEIGHT = 1080
+    
     for file in files:
         if file and file.filename:
             filename = secure_filename(file.filename)
@@ -103,6 +107,27 @@ def upload_images():
             # Convert to RGB if needed
             if image.mode != 'RGB':
                 image = image.convert('RGB')
+            
+            # Resize image if it's too large
+            width, height = image.size
+            if width > MAX_WIDTH or height > MAX_HEIGHT:
+                # Calculate scaling factor
+                scale_x = MAX_WIDTH / width if width > MAX_WIDTH else 1
+                scale_y = MAX_HEIGHT / height if height > MAX_HEIGHT else 1
+                scale = min(scale_x, scale_y)
+                
+                # Calculate new dimensions
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                
+                # Resize image
+                image = image.resize((new_width, new_height), Image.LANCZOS)
+                
+                # Save resized image back to disk
+                image.save(filepath, quality=95)
+                
+                print(f"Image {filename} resized from {width}x{height} to {new_width}x{new_height}")
+            
             # Convert to numpy array and then to BGR (OpenCV format)
             image_rgb = np.array(image)
             image_np = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
@@ -229,14 +254,35 @@ def convert_pdf_pages():
             from io import BytesIO
             image = Image.open(BytesIO(img_bytes))
             
+            # Convert to RGB if needed
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Resize image if it's too large
+            MAX_WIDTH = 1920
+            MAX_HEIGHT = 1080
+            width, height = image.size
+            if width > MAX_WIDTH or height > MAX_HEIGHT:
+                # Calculate scaling factor
+                scale_x = MAX_WIDTH / width if width > MAX_WIDTH else 1
+                scale_y = MAX_HEIGHT / height if height > MAX_HEIGHT else 1
+                scale = min(scale_x, scale_y)
+                
+                # Calculate new dimensions
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                
+                # Resize image
+                image = image.resize((new_width, new_height), Image.LANCZOS)
+                
+                print(f"PDF page {page_data['page_num']} resized from {width}x{height} to {new_width}x{new_height}")
+            
             # Save as image file
             filename = f"pdf_{page_data['pdf_id']}_page_{page_data['page_num']}.png"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{session_id}_{filename}")
             image.save(filepath)
             
             # Store in session - convert to BGR (OpenCV format)
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
             image_rgb = np.array(image)
             image_np = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
             sessions[session_id]['images'][filename] = {
