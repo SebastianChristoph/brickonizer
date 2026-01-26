@@ -159,7 +159,7 @@ function initializeCanvas() {
                     return;
                 }
                 
-                // Set detected boxes
+                // Set detected boxes (no scaling needed - server already uses scaled images)
                 appState.canvasDrawer.setBoxes(data.boxes);
                 
                 // Step 2: Automatically remove text from boxes
@@ -184,7 +184,7 @@ function initializeCanvas() {
                 if (overlay) overlay.style.display = 'none';
                 
                 if (cropData.success) {
-                    // Update boxes with cropped versions
+                    // Update boxes with cropped versions (no scaling needed)
                     appState.canvasDrawer.setBoxes(cropData.boxes);
                     
                     if (cropData.modified > 0) {
@@ -238,6 +238,7 @@ function initializeCanvas() {
                 const data = await response.json();
                 
                 if (data.success) {
+                    // Update with cropped boxes (no scaling needed)
                     appState.canvasDrawer.setBoxes(data.boxes);
                     
                     if (data.modified > 0) {
