@@ -147,6 +147,72 @@ def upload_images():
     return jsonify({'uploaded': uploaded})
 
 
+@app.route('/upload_image', methods=['POST'])
+def upload_single_image():
+    """Handle single image upload (for cropped images that overwrite existing ones)"""
+    session_id = session.get('session_id')
+    if not session_id or session_id not in sessions:
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    file = request.files.get('file')
+    overwrite = request.form.get('overwrite', 'false').lower() == 'true'
+    
+    if not file or not file.filename:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    filename = secure_filename(file.filename)
+    
+    # Ensure filename has an extension
+    if not filename or '.' not in filename:
+        return jsonify({'error': 'Invalid filename'}), 400
+    
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{session_id}_{filename}")
+    
+    # Save the file temporarily
+    temp_path = filepath + '.tmp'
+    file.save(temp_path)
+    
+    # Load and process image
+    image = Image.open(temp_path)
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    
+    # Get format from filename extension
+    ext = filename.rsplit('.', 1)[1].lower()
+    format_map = {'jpg': 'JPEG', 'jpeg': 'JPEG', 'png': 'PNG', 'gif': 'GIF'}
+    img_format = format_map.get(ext, 'JPEG')
+    
+    # Save with correct format
+    image.save(filepath, format=img_format, quality=95)
+    
+    # Remove temp file
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+    
+    # Convert to numpy array for OpenCV
+    image_rgb = np.array(image)
+    image_np = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    
+    # Update or create session entry
+    if overwrite and filename in sessions[session_id]['images']:
+        # Clear boxes when overwriting (crop changes image dimensions)
+        sessions[session_id]['images'][filename]['filepath'] = filepath
+        sessions[session_id]['images'][filename]['image_np'] = image_np
+        sessions[session_id]['images'][filename]['boxes'] = []
+    else:
+        sessions[session_id]['images'][filename] = {
+            'filepath': filepath,
+            'image_np': image_np,
+            'boxes': []
+        }
+    
+    return jsonify({
+        'success': True,
+        'filename': filename,
+        'url': f'/image/{filename}'
+    })
+
+
 @app.route('/upload_pdf', methods=['POST'])
 def upload_pdf():
     """Handle PDF upload and extract pages"""
