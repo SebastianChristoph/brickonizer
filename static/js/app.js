@@ -155,7 +155,8 @@ function initializeCanvas() {
             if (data.success) {
                 // Check if no boxes were detected
                 if (data.count === 0) {
-                    alert('⚠️ No parts detected!\n\nAuto-Detect could not find any LEGO parts in the image. This can happen if:\n• The image is too bright/dark\n• There is not enough contrast\n• The parts are very small\n\nTry another image or mark the parts manually.');
+                    // Show crop modal instead of alert
+                    showCropModal(appState.canvasDrawer.currentFilename);
                     return;
                 }
                 
@@ -482,7 +483,9 @@ async function loadImageToCanvas(filename) {
     const image = appState.uploadedImages.find(img => img.filename === filename);
     if (!image) return;
     
-    await appState.canvasDrawer.loadImage(image.url, filename);
+    // Add cache busting timestamp
+    const url = `${image.url}?t=${Date.now()}`;
+    await appState.canvasDrawer.loadImage(url, filename);
     appState.canvasDrawer.updateBoxCount();
     await updateAnalyzeButtonState();
 }
@@ -1088,7 +1091,8 @@ function showOriginalImageOnHover(imageName) {
         }
     };
     
-    img.src = `/image/${imageName}`;
+    // Add cache busting to always get the latest version (especially after cropping)
+    img.src = `/image/${imageName}?t=${Date.now()}`;
     modal.classList.add('active');
 }
 
@@ -1480,8 +1484,12 @@ async function savePart() {
     if (selectedColor) {
         // Remove if already in list
         appState.recentColors = appState.recentColors.filter(c => c.id !== selectedColor.id);
-        // Add to front
-        appState.recentColors.unshift(selectedColor);
+        // Add to front with proper structure
+        appState.recentColors.unshift({
+            id: selectedColor.id,
+            rgb: selectedColor.rgb,
+            name: selectedColor.name
+        });
         // Keep only last 3
         if (appState.recentColors.length > 3) {
             appState.recentColors = appState.recentColors.slice(0, 3);
@@ -1906,6 +1914,26 @@ function selectColor(colorId, rgb, colorName) {
     // Update display
     document.getElementById('selected-color-circle').style.background = rgb;
     document.getElementById('selected-color-text').textContent = colorName || colorId;
+    
+    // Add to recent colors if not already there
+    const existingIndex = appState.recentColors.findIndex(c => c.id === colorId);
+    if (existingIndex === -1) {
+        // Add to beginning of recent colors
+        appState.recentColors.unshift({
+            id: colorId,
+            rgb: rgb,
+            name: colorName
+        });
+        
+        // Keep only last 3 recent colors
+        if (appState.recentColors.length > 3) {
+            appState.recentColors.pop();
+        }
+    } else {
+        // Move to front if already exists
+        const color = appState.recentColors.splice(existingIndex, 1)[0];
+        appState.recentColors.unshift(color);
+    }
     
     // Close dropdown
     document.getElementById('color-dropdown-list').style.display = 'none';
@@ -2333,3 +2361,250 @@ if (typeof initializeTabs !== 'function') {
     }
 }
 window.initializeTabs = initializeTabs;
+
+// ===== IMAGE CROP FUNCTIONALITY =====
+
+let cropState = {
+    canvas: null,
+    ctx: null,
+    image: null,
+    filename: null,
+    cropBox: null,
+    isDrawing: false,
+    startX: 0,
+    startY: 0
+};
+
+function showCropModal(filename) {
+    const modal = document.getElementById('crop-modal');
+    cropState.canvas = document.getElementById('crop-canvas');
+    cropState.ctx = cropState.canvas.getContext('2d');
+    cropState.filename = filename;
+    cropState.cropBox = null;
+    
+    // Load the image
+    const img = new Image();
+    img.onload = function() {
+        cropState.image = img;
+        
+        // Set canvas size to image size
+        cropState.canvas.width = img.width;
+        cropState.canvas.height = img.height;
+        
+        // Draw image
+        cropState.ctx.drawImage(img, 0, 0);
+        
+        // Setup event listeners
+        setupCropEventListeners();
+    };
+    
+    img.src = `/image/${filename}?t=${Date.now()}`;
+    modal.style.display = 'block';
+}
+
+function setupCropEventListeners() {
+    const canvas = cropState.canvas;
+    
+    canvas.onmousedown = function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        cropState.startX = (e.clientX - rect.left) * scaleX;
+        cropState.startY = (e.clientY - rect.top) * scaleY;
+        cropState.isDrawing = true;
+        cropState.cropBox = {
+            x: cropState.startX,
+            y: cropState.startY,
+            width: 0,
+            height: 0
+        };
+    };
+    
+    canvas.onmousemove = function(e) {
+        if (!cropState.isDrawing) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        const currentX = (e.clientX - rect.left) * scaleX;
+        const currentY = (e.clientY - rect.top) * scaleY;
+        
+        cropState.cropBox.width = currentX - cropState.startX;
+        cropState.cropBox.height = currentY - cropState.startY;
+        
+        // Redraw
+        redrawCropCanvas();
+    };
+    
+    canvas.onmouseup = function(e) {
+        cropState.isDrawing = false;
+        
+        // Normalize crop box (handle negative dimensions)
+        if (cropState.cropBox.width < 0) {
+            cropState.cropBox.x += cropState.cropBox.width;
+            cropState.cropBox.width = Math.abs(cropState.cropBox.width);
+        }
+        if (cropState.cropBox.height < 0) {
+            cropState.cropBox.y += cropState.cropBox.height;
+            cropState.cropBox.height = Math.abs(cropState.cropBox.height);
+        }
+        
+        redrawCropCanvas();
+    };
+}
+
+function redrawCropCanvas() {
+    const ctx = cropState.ctx;
+    const canvas = cropState.canvas;
+    
+    // Clear and redraw image
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(cropState.image, 0, 0);
+    
+    if (cropState.cropBox) {
+        // Draw semi-transparent overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Clear the crop area
+        ctx.clearRect(
+            cropState.cropBox.x,
+            cropState.cropBox.y,
+            cropState.cropBox.width,
+            cropState.cropBox.height
+        );
+        
+        // Redraw image in crop area
+        ctx.drawImage(
+            cropState.image,
+            cropState.cropBox.x,
+            cropState.cropBox.y,
+            cropState.cropBox.width,
+            cropState.cropBox.height,
+            cropState.cropBox.x,
+            cropState.cropBox.y,
+            cropState.cropBox.width,
+            cropState.cropBox.height
+        );
+        
+        // Draw border around crop area
+        ctx.strokeStyle = '#667eea';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(
+            cropState.cropBox.x,
+            cropState.cropBox.y,
+            cropState.cropBox.width,
+            cropState.cropBox.height
+        );
+    }
+}
+
+function closeCropModal() {
+    document.getElementById('crop-modal').style.display = 'none';
+    cropState = {
+        canvas: null,
+        ctx: null,
+        image: null,
+        filename: null,
+        cropBox: null,
+        isDrawing: false,
+        startX: 0,
+        startY: 0
+    };
+}
+
+async function applyCrop() {
+    if (!cropState.cropBox || cropState.cropBox.width < 50 || cropState.cropBox.height < 50) {
+        alert('Please select a larger area to crop.');
+        return;
+    }
+    
+    // Store filename before anything else
+    const filename = cropState.filename;
+    
+    if (!filename) {
+        alert('Error: No filename found. Please try again.');
+        return;
+    }
+    
+    // Show loading state
+    const applyBtn = document.querySelector('#crop-modal button[onclick="applyCrop()"]');
+    const originalBtnText = applyBtn.innerHTML;
+    applyBtn.innerHTML = '<span class="spinner-circle" style="width: 16px; height: 16px; display: inline-block; margin-right: 5px; border: 2px solid #fff; border-top-color: transparent; vertical-align: middle;"></span>Processing...';
+    applyBtn.disabled = true;
+    
+    // Create a new canvas for the cropped image
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = cropState.cropBox.width;
+    croppedCanvas.height = cropState.cropBox.height;
+    const croppedCtx = croppedCanvas.getContext('2d');
+    
+    // Draw the cropped portion
+    croppedCtx.drawImage(
+        cropState.image,
+        cropState.cropBox.x,
+        cropState.cropBox.y,
+        cropState.cropBox.width,
+        cropState.cropBox.height,
+        0,
+        0,
+        cropState.cropBox.width,
+        cropState.cropBox.height
+    );
+    
+    // Convert to blob and create a temporary URL
+    croppedCanvas.toBlob(async (blob) => {
+        try {
+            // Create object URL for immediate display
+            const croppedImageUrl = URL.createObjectURL(blob);
+            
+            // Close crop modal first
+            closeCropModal();
+            
+            // Clear boxes 
+            appState.canvasDrawer.boxes = [];
+            
+            // Load cropped image directly into canvas
+            await appState.canvasDrawer.loadImage(croppedImageUrl, filename);
+            
+            // Upload cropped image to server in background
+            const formData = new FormData();
+            formData.append('file', blob, filename);
+            formData.append('overwrite', 'true');
+            
+            const response = await fetch('/upload_image', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to upload cropped image');
+            }
+            
+            // Update the image URL in uploadedImages
+            const imageIndex = appState.uploadedImages.findIndex(img => img.filename === filename);
+            if (imageIndex !== -1) {
+                appState.uploadedImages[imageIndex].url = `/image/${filename}`;
+            }
+            
+            // Automatically trigger auto-detect again
+            const autoDetectBtn = document.getElementById('auto-detect-btn');
+            autoDetectBtn.click();
+            
+            // Clean up object URL after a delay
+            setTimeout(() => URL.revokeObjectURL(croppedImageUrl), 5000);
+            
+        } catch (error) {
+            console.error('Error applying crop:', error);
+            alert('Error saving cropped image. Please try again.');
+            applyBtn.innerHTML = originalBtnText;
+            applyBtn.disabled = false;
+        }
+    }, 'image/jpeg', 0.95);
+}
+
+window.showCropModal = showCropModal;
+window.closeCropModal = closeCropModal;
+window.applyCrop = applyCrop;
