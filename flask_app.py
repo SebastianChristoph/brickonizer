@@ -12,9 +12,10 @@ from PIL import Image
 import numpy as np
 import cv2
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import fitz  # PyMuPDF
 import pytesseract
+import shutil
 
 from models import BoundingBox, ProcessedPart, ImageSession
 from services import ImageProcessor, get_api_instance
@@ -42,9 +43,37 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max for PDFs
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'unrecognized'), exist_ok=True)
 
 # In-memory storage for sessions (in production, use Redis or database)
 sessions = {}
+
+
+def cleanup_old_unrecognized_sessions():
+    """Delete unrecognized session folders older than 30 days"""
+    unrecognized_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'unrecognized')
+    if not os.path.exists(unrecognized_dir):
+        return
+    
+    cutoff_time = datetime.now() - timedelta(days=30)
+    deleted_count = 0
+    
+    try:
+        for session_folder in os.listdir(unrecognized_dir):
+            folder_path = os.path.join(unrecognized_dir, session_folder)
+            if os.path.isdir(folder_path):
+                try:
+                    folder_mtime = datetime.fromtimestamp(os.path.getmtime(folder_path))
+                    if folder_mtime < cutoff_time:
+                        shutil.rmtree(folder_path)
+                        deleted_count += 1
+                        print(f"Deleted old session folder: {session_folder}")
+                except Exception as e:
+                    print(f"Error deleting folder {session_folder}: {e}")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+    
+    return deleted_count
 
 
 @app.route('/')
@@ -216,6 +245,9 @@ def upload_single_image():
 @app.route('/upload_pdf', methods=['POST'])
 def upload_pdf():
     """Handle PDF upload and extract pages"""
+    # Cleanup old unrecognized session folders (>30 days)
+    cleanup_old_unrecognized_sessions()
+    
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -407,6 +439,23 @@ def get_image(filename):
     
     from flask import send_file
     return send_file(image_data['filepath'])
+
+
+@app.route('/unrecognized/<session_id>/<filename>')
+def get_unrecognized_image(session_id, filename):
+    """Serve unrecognized part crop images"""
+    from flask import send_file, abort
+    
+    # Validate filename to prevent directory traversal
+    if '..' in filename or '/' in filename or '\\' in filename:
+        abort(403)
+    
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'unrecognized', session_id, filename)
+    
+    if not os.path.exists(filepath):
+        abort(404)
+    
+    return send_file(filepath, mimetype='image/jpeg')
 
 
 @app.route('/save_boxes', methods=['POST'])
@@ -1146,12 +1195,45 @@ def export_json():
                     'confidence': part.recognition_result.confidence if part.recognition_result else 0.0
                 })
     
+    # Save unrecognized part images and generate URLs
+    unrecognized_image_urls = []
+    if unknown_count > 0:
+        # Create session folder for unrecognized parts
+        session_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'unrecognized', session_id)
+        os.makedirs(session_folder, exist_ok=True)
+        
+        # Save each unrecognized part's crop image
+        for unrec in unrecognized_parts:
+            idx = unrec['index']
+            if idx < len(parts):
+                part = parts[idx]
+                if part.part_crop is not None:
+                    # Save crop as JPG
+                    filename = f"part_{idx}.jpg"
+                    filepath = os.path.join(session_folder, filename)
+                    
+                    try:
+                        # Convert numpy array to PIL Image and save
+                        if isinstance(part.part_crop, np.ndarray):
+                            crop_image = Image.fromarray(part.part_crop)
+                        else:
+                            crop_image = part.part_crop
+                        
+                        crop_image.save(filepath, 'JPEG', quality=85)
+                        
+                        # Generate URL (works with reverse proxy)
+                        url = f"{request.host_url}unrecognized/{session_id}/{filename}"
+                        unrecognized_image_urls.append(url)
+                    except Exception as e:
+                        print(f"Error saving unrecognized part image {idx}: {e}")
+    
     result = {
         'totalParts': len(parts),
         'recognizedParts': len(valid_parts),
         'unrecognizedCount': unknown_count,
         'skippedCount': skipped_count,
         'unrecognizedParts': unrecognized_parts,  # Add this so frontend knows which parts are unrecognized
+        'unrecognizedPartImages': unrecognized_image_urls,  # NEW: URLs to unrecognized part images
         'parts': valid_parts
     }
     
