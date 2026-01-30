@@ -15,6 +15,8 @@ const appState = {
     oftenParts: [],  // Often unrecognized parts (loaded dynamically)
     isAutoDetecting: false,  // Track auto-detect state
     recentColors: [],  // Recently used colors (max 3)
+    usedColors: [],  // Colors that have been used in the current set
+    userAddedParts: [],  // Parts that user manually added with part number and image
     helpBoxTutorialShown: false  // Track if help box tutorial was shown
 };
 
@@ -864,17 +866,40 @@ function renderOftenUnrecognizedSidebar(isRecognized, keepCurrentState = false) 
     }
     
     let partsHtml = '';
-    appState.oftenParts.forEach(part => {
-        partsHtml += `
-            <div class="often-part-item" onclick="useOftenPart('${part.number}')" title="Click to use this part number">
-                <img src="${part.image}" alt="${part.number}" onerror="this.style.display='none'">
-                <div class="often-part-info">
-                    <div class="often-part-number">${part.number}</div>
-                    <div class="often-part-hint">Click to use</div>
+    
+    // Add user-added parts first (from this session)
+    if (appState.userAddedParts.length > 0) {
+        partsHtml += '<div style="font-size: 11px; font-weight: bold; color: #667eea; margin-bottom: 8px; padding: 8px; background: #f0f4ff; border-radius: 4px; text-align: center;">💾 YOUR PARTS (THIS SESSION)</div>';
+        appState.userAddedParts.forEach(part => {
+            partsHtml += `
+                <div class="often-part-item" onclick="useOftenPart('${part.number}')" title="Click to use: ${part.number}">
+                    <img src="${part.image}" alt="${part.number}" onerror="this.style.display='none'">
+                    <div class="often-part-info">
+                        <div class="often-part-number">${part.number}</div>
+                        <div class="often-part-hint">Click to use</div>
+                    </div>
                 </div>
-            </div>
-        `;
-    });
+            `;
+        });
+    }
+    
+    // Add default often unrecognized parts
+    if (appState.oftenParts.length > 0) {
+        if (appState.userAddedParts.length > 0) {
+            partsHtml += '<div style="font-size: 11px; font-weight: bold; color: #999; margin: 15px 0 8px 0; padding: 8px; background: #f5f5f5; border-radius: 4px; text-align: center;">📚 COMMON UNRECOGNIZED PARTS</div>';
+        }
+        appState.oftenParts.forEach(part => {
+            partsHtml += `
+                <div class="often-part-item" onclick="useOftenPart('${part.number}')" title="Click to use this part number">
+                    <img src="${part.image}" alt="${part.number}" onerror="this.style.display='none'">
+                    <div class="often-part-info">
+                        <div class="often-part-number">${part.number}</div>
+                        <div class="often-part-hint">Click to use</div>
+                    </div>
+                </div>
+            `;
+        });
+    }
     
     return `
         <button class="often-sidebar-toggle" onclick="toggleOftenSidebar()" id="often-toggle-btn">
@@ -984,6 +1009,8 @@ function useOftenPart(partNumber) {
 }
 
 function getQuickColorChips() {
+    console.log('getQuickColorChips called. usedColors:', appState.usedColors);
+    
     const quickColors = [
         "Black",
         "White",
@@ -999,28 +1026,13 @@ function getQuickColorChips() {
     
     let chipsHtml = '';
     
-    // Add recently used colors first (if any)
-    if (appState.recentColors.length > 0) {
-        appState.recentColors.forEach(color => {
-            const hexColor = color.rgb;
-            chipsHtml += `
-                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${color.name.replace(/'/g, "\\'")}')" 
-                     title="${color.name} (Recently used)" style="border: 2px solid #667eea;">
-                    <div class="quick-color-chip-circle" style="background: ${hexColor};"></div>
-                    <span class="quick-color-chip-name">${color.name}</span>
-                </div>
-            `;
-        });
-    }
-    
-    // Add standard quick colors, but skip if already in recent colors
-    const recentColorIds = appState.recentColors.map(c => c.id);
+    // Add standard quick colors
     quickColors.forEach(colorName => {
         const color = appState.colors.find(c => c.name === colorName);
-        if (color && !recentColorIds.includes(color.id)) {
+        if (color) {
             const hexColor = color.rgb;
             chipsHtml += `
-                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${colorName.replace(/'/g, "\\'")}')" 
+                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${colorName.replace(/'/g, "\\'")}')"
                      title="${colorName}">
                     <div class="quick-color-chip-circle" style="background: ${hexColor};"></div>
                     <span class="quick-color-chip-name">${colorName}</span>
@@ -1029,6 +1041,26 @@ function getQuickColorChips() {
         }
     });
     
+    // Add "Colors in your set" section if there are used colors
+    if (appState.usedColors.length > 0) {
+        console.log('Adding Colors in your set section with', appState.usedColors.length, 'colors');
+        chipsHtml += '<div style="width: 100%; margin: 15px 0 10px 0; padding: 10px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); border-radius: 6px; font-size: 12px; font-weight: bold; color: white; text-align: center; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);">✓ Colors in your set:</div>';
+        
+        appState.usedColors.forEach(color => {
+            const hexColor = color.rgb;
+            chipsHtml += `
+                <div class="quick-color-chip" onclick="selectQuickColor('${color.id}', '${hexColor}', '${color.name.replace(/'/g, "\\'")}')"
+                     title="${color.name}" style="border: 3px solid #28a745; box-shadow: 0 2px 6px rgba(40, 167, 69, 0.2);">
+                    <div class="quick-color-chip-circle" style="background: ${hexColor};"></div>
+                    <span class="quick-color-chip-name">${color.name}</span>
+                </div>
+            `;
+        });
+    } else {
+        console.log('No used colors yet');
+    }
+    
+    console.log('Generated chips HTML length:', chipsHtml.length);
     return chipsHtml;
 }
 
@@ -1254,8 +1286,9 @@ function displayReviewPart(keepSidebarState = false) {
             const blColor = appState.colors.find(c => c.name === color.name || c.id === color.name);
             const hexColor = blColor ? blColor.rgb : '#ccc';  // RGB is actually HEX string
             const displayName = blColor ? blColor.name : color.name;  // Use BrickLink name
+            const colorId = blColor ? blColor.id : color.name;  // Use BrickLink ID if available
             colorOptions += `
-                <div class="color-option" data-value="${color.name}" data-rgb="${hexColor}" onclick="selectColor('${color.name}', '${hexColor}', '${displayName.replace(/'/g, "\\'")}')">  
+                <div class="color-option" data-value="${colorId}" data-rgb="${hexColor}" onclick="selectColor('${colorId}', '${hexColor}', '${displayName.replace(/'/g, "\\'")}')">  
                     <div class="color-circle" style="background: ${hexColor}; border: 2px solid #333;"></div>
                     <span>${displayName}</span>
                 </div>`;
@@ -1479,20 +1512,42 @@ async function savePart() {
         return;
     }
     
-    // Add color to recent colors (max 3, remove duplicates)
-    const selectedColor = appState.colors.find(c => c.id === colorId || c.name === colorId);
+    // Add color to usedColors if not already there
+    const selectedColor = appState.colors.find(c => 
+        c.id === colorId || 
+        c.id === parseInt(colorId) || 
+        c.name === colorId
+    );
+    console.log('Saving part. colorId:', colorId, 'Selected color:', selectedColor);
+    
     if (selectedColor) {
-        // Remove if already in list
-        appState.recentColors = appState.recentColors.filter(c => c.id !== selectedColor.id);
-        // Add to front with proper structure
-        appState.recentColors.unshift({
-            id: selectedColor.id,
-            rgb: selectedColor.rgb,
-            name: selectedColor.name
-        });
-        // Keep only last 3
-        if (appState.recentColors.length > 3) {
-            appState.recentColors = appState.recentColors.slice(0, 3);
+        const existingUsedColor = appState.usedColors.find(c => c.id === selectedColor.id);
+        console.log('Existing used color?', existingUsedColor);
+        
+        if (!existingUsedColor) {
+            // Add to usedColors
+            appState.usedColors.push({
+                id: selectedColor.id,
+                rgb: selectedColor.rgb,
+                name: selectedColor.name
+            });
+            console.log('Added color to usedColors. Total now:', appState.usedColors.length, appState.usedColors);
+        } else {
+            console.log('Color already in usedColors');
+        }
+    } else {
+        console.log('Could not find selected color in appState.colors. colorId was:', colorId, 'type:', typeof colorId);
+    }
+    
+    // If this was an unrecognized or no_match part, add it to userAddedParts
+    if (!part.recognized || part.no_match) {
+        const existingPart = appState.userAddedParts.find(p => p.number === partNum);
+        if (!existingPart) {
+            // Add to userAddedParts with crop image
+            appState.userAddedParts.push({
+                number: partNum,
+                image: part.crop_image ? `data:image/jpeg;base64,${part.crop_image}` : ''
+            });
         }
     }
     
@@ -1608,6 +1663,13 @@ async function unknownPart() {
 async function noMatchPart() {
     // Mark as reviewed and unrecognized
     appState.reviewedParts.add(appState.currentReviewIndex);
+    
+    // Mark the part as no_match in client state
+    const part = appState.reviewData[appState.currentReviewIndex];
+    if (part) {
+        part.no_match = true;
+        part.recognized = false; // Also mark as unrecognized
+    }
     
     await fetch('/update_part', {
         method: 'POST',
@@ -1914,26 +1976,6 @@ function selectColor(colorId, rgb, colorName) {
     // Update display
     document.getElementById('selected-color-circle').style.background = rgb;
     document.getElementById('selected-color-text').textContent = colorName || colorId;
-    
-    // Add to recent colors if not already there
-    const existingIndex = appState.recentColors.findIndex(c => c.id === colorId);
-    if (existingIndex === -1) {
-        // Add to beginning of recent colors
-        appState.recentColors.unshift({
-            id: colorId,
-            rgb: rgb,
-            name: colorName
-        });
-        
-        // Keep only last 3 recent colors
-        if (appState.recentColors.length > 3) {
-            appState.recentColors.pop();
-        }
-    } else {
-        // Move to front if already exists
-        const color = appState.recentColors.splice(existingIndex, 1)[0];
-        appState.recentColors.unshift(color);
-    }
     
     // Close dropdown
     document.getElementById('color-dropdown-list').style.display = 'none';
